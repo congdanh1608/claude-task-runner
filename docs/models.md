@@ -90,11 +90,22 @@ These aliases belong to no automated row and are never selected by `--row` or ro
 
    `hydrogen` (`gemini`) is the first alias in `code` and both `gemini` and `hydrogen` are enabled.
 
-2. **With `codex` turned `off`** (`task off codex`):
+2. **With `gemini` turned `off`** (`task off gemini`):
 
    ```bash
    ~/.claude/scripts/task resolve code
-   # gemini - hydrogen
+   # codex - luna
    ```
 
-   Because `hydrogen` runs on `gemini` and sits ahead of `luna` and `sol` in `code`, `task resolve code` still returns `gemini - hydrogen`. Turning `codex` off only removes `luna` and `sol` from the fallback chain (if `gemini` or `hydrogen` were also turned off, `task resolve code` would skip `luna` and resolve to `opencode - deepseek`).
+   `hydrogen` runs on `gemini`, so it is skipped and the next alias in `code`, `luna` (`codex`), is chosen.
+
+3. **With `gemini` and `codex` both `off`** (`task off codex`):
+
+   ```bash
+   ~/.claude/scripts/task resolve code
+   # opencode - deepseek
+   ```
+
+   `luna` and `sol` run on `codex`, so the first enabled alias left in `code` is `deepseek` (`opencode`).
+
+Turning only `codex` off leaves `task resolve code` at `gemini - hydrogen`, because `hydrogen` comes first and runs on `gemini`.

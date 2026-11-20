@@ -97,7 +97,7 @@ command -v task
 | `task quota [--md]` | Show quota signals and limits for all configured workers |
 | `task clean sessions` | Delete transcripts and file-history for archived Claude sessions |
 
-Full syntax, flags and exit codes: [docs/commands.md](docs/commands.md).
+Full syntax, flags and exit codes: [docs/commands.md](docs/commands.md). Which model each row uses: [docs/models.md](docs/models.md).
 
 ## Built-in Skills
 
