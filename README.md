@@ -57,6 +57,32 @@ For example, test the Gemini Flash model or Codex Luna:
 
 See [docs/workers.md](docs/workers.md) for full testing and configuration options.
 
+### Make `task` easy to type
+
+The hook installs the launcher at `~/.claude/scripts/task`, but `~/.claude/scripts` is not on `PATH` by default (the plugin never edits your shell rc files). Claude itself calls `~/.claude/scripts/task` by full path, so adding it to `PATH` is only for typing `task` directly in your own terminal.
+
+The plugin cache lives at `~/.claude/plugins/cache/<marketplace>/task-runner/<version>/` (on Windows: `%USERPROFILE%\.claude\plugins\cache\<marketplace>\task-runner\<version>\`).
+
+- **macOS (zsh is the default shell) and Linux (bash)**: append the following line to `~/.zshrc` (macOS) or `~/.bashrc` (Linux/bash), open a new terminal, and run `task workers`:
+
+  ```bash
+  export PATH="$HOME/.claude/scripts:$PATH"
+  ```
+
+  Alternatively, add an alias instead of editing `PATH`:
+
+  ```bash
+  alias task="$HOME/.claude/scripts/task"
+  ```
+
+- **Windows (untested)**: `scripts/install-launchers.sh` generates `~/.claude/scripts/task` as a `#!/bin/bash` script, so use **WSL** or **Git Bash** (untested) with the same `export PATH="$HOME/.claude/scripts:$PATH"` line in that shell's rc file (`~/.bashrc` or `~/.zshrc`). Native **PowerShell** and **CMD** are not supported (and untested): in addition to the bash launcher, `scripts/task.py` imports POSIX-only APIs (`fcntl`, `os.killpg`, `signal.SIGHUP`, and `ps`), so running `python3 <plugin cache>\scripts\task.py ...` directly in native Windows Python is not a working fallback.
+
+Check that `task` is on your `PATH`:
+
+```bash
+command -v task
+```
+
 ## Quick command reference
 
 | Command | What it does |
@@ -107,5 +133,6 @@ Integrations with external tools or plugins (such as custom statuslines, progres
 ## Documentation
 
 - [Command Reference](docs/commands.md): full `task` subcommand syntax, flags, exit codes, walk-through, and troubleshooting.
+- [Model Assignment](docs/models.md): how task rows map to model aliases, fallback order, overrides, and quota handling.
 - [Worker Configuration and Management](docs/workers.md): switches, model mappings, fallback tables, and optional workers.
 - [Relay Worker Setup](docs/relay.md): configuring external Claude API gateways, credentials, model aliases, and limits.
