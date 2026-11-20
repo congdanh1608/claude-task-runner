@@ -7,11 +7,14 @@ Prints `file:line: <pattern name>` or `commit:file:line: <pattern name>` only,
 never the matched text.
 Optional env vars:
   PLUGIN_DENYLIST: readable file of case-insensitive literal terms (one per line).
-  PLUGIN_NAME_DIRS: os.pathsep-separated directories whose depth-1/2 subdirs
-                    are matched as whole words (`project-name`).
+  PLUGIN_NAME_DIRS: os.pathsep-separated directories or glob patterns whose depth-1
+                    subdirs are matched as whole words (`project-name`).
+  PLUGIN_NAME_ALLOW: comma-separated case-insensitive names excluded from
+                     PLUGIN_NAME_DIRS matches.
   PLUGIN_URL_ALLOW: comma-separated extra allowed URL hosts (exact or subdomain).
 """
 import argparse
+import glob
 import os
 import re
 import subprocess
@@ -77,6 +80,10 @@ NAME_STOPLIST = frozenset({
     'build', 'assets', 'backend', 'frontend', 'mobile', 'api', 'common',
     'shared', 'tools', 'node_modules', 'readme.md', 'release', 'debug',
     'main', 'master', 'develop',
+    'output', 'data', 'skills', 'logs', 'source', 'demo', 'content', 'chosen',
+    'secrets', 'plugins', 'images', 'fonts', 'public', 'private', 'temp',
+    'tmp', 'cache', 'dist', 'out', 'bin', 'vendor', 'examples', 'sample',
+    'samples',
 })
 
 HUNK_RE = re.compile(r'^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@')
@@ -111,40 +118,40 @@ def _add_project_name(names, raw_name):
     names.add(lowered)
 
 
+def load_name_allow():
+    raw = os.environ.get('PLUGIN_NAME_ALLOW', '')
+    if not raw:
+        return frozenset()
+    return frozenset(item.strip().lower() for item in raw.split(',') if item.strip())
+
+
 def load_project_names():
     raw_dirs = os.environ.get('PLUGIN_NAME_DIRS', '')
     if not raw_dirs:
         return None
     names = set()
-    for root_dir in raw_dirs.split(os.pathsep):
-        if not root_dir:
+    for entry in raw_dirs.split(os.pathsep):
+        if not entry:
             continue
-        try:
-            with os.scandir(root_dir) as d1_entries:
-                d1_list = list(d1_entries)
-        except OSError:
-            print('check-sensitive: warning: cannot read name directory', file=sys.stderr)
+        matches = sorted(glob.glob(os.path.expanduser(entry)))
+        if not matches:
+            print('check-sensitive: warning: name directory pattern matched nothing', file=sys.stderr)
             continue
-        for e1 in d1_list:
+        for root_dir in matches:
             try:
-                if not e1.is_dir() or e1.name.startswith('.'):
-                    continue
+                with os.scandir(root_dir) as d1_entries:
+                    d1_list = list(d1_entries)
             except OSError:
+                print('check-sensitive: warning: cannot read name directory', file=sys.stderr)
                 continue
-            _add_project_name(names, e1.name)
-            try:
-                with os.scandir(e1.path) as d2_entries:
-                    d2_list = list(d2_entries)
-            except OSError:
-                print('check-sensitive: warning: cannot read name subdirectory', file=sys.stderr)
-                continue
-            for e2 in d2_list:
+            for e1 in d1_list:
                 try:
-                    if not e2.is_dir() or e2.name.startswith('.'):
+                    if not e1.is_dir() or e1.name.startswith('.'):
                         continue
                 except OSError:
                     continue
-                _add_project_name(names, e2.name)
+                _add_project_name(names, e1.name)
+    names -= load_name_allow()
     if not names:
         return None
     pattern = r'\b(?:' + '|'.join(re.escape(n) for n in sorted(names)) + r')\b'
@@ -271,7 +278,19 @@ def scan_history(denylist, project_name_rx, url_allow):
 
 
 def parse_args(argv):
-    parser = argparse.ArgumentParser(description='Scan repo for secrets and sensitive info.')
+    parser = argparse.ArgumentParser(
+        description='Scan repo for secrets and sensitive info.',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            'Environment variables:\n'
+            '  PLUGIN_DENYLIST    Readable file of case-insensitive literal terms (one per line).\n'
+            '  PLUGIN_NAME_DIRS   os.pathsep-separated directories or glob patterns whose depth-1\n'
+            '                     subdirs are matched as whole words (`project-name`).\n'
+            '  PLUGIN_NAME_ALLOW  Comma-separated case-insensitive names excluded from\n'
+            '                     PLUGIN_NAME_DIRS matches.\n'
+            '  PLUGIN_URL_ALLOW   Comma-separated extra allowed URL hosts (exact or subdomain).'
+        ),
+    )
     parser.add_argument('--all', action='store_true', help='Scan all tracked files instead of staged.')
     parser.add_argument('--history', action='store_true', help='Scan all git history and author emails.')
     return parser.parse_args(argv)
