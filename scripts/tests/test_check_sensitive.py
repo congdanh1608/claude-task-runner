@@ -27,15 +27,18 @@ class CheckSensitiveTests(unittest.TestCase):
             text=True,
         )
 
-    def _run_scan(self, *args, denylist_path=None, name_dirs=None, url_allow=None):
+    def _run_scan(self, *args, denylist_path=None, name_dirs=None, name_allow=None, url_allow=None):
         env = dict(os.environ)
         env.pop('PLUGIN_DENYLIST', None)
         env.pop('PLUGIN_NAME_DIRS', None)
+        env.pop('PLUGIN_NAME_ALLOW', None)
         env.pop('PLUGIN_URL_ALLOW', None)
         if denylist_path is not None:
             env['PLUGIN_DENYLIST'] = str(denylist_path)
         if name_dirs is not None:
             env['PLUGIN_NAME_DIRS'] = str(name_dirs)
+        if name_allow is not None:
+            env['PLUGIN_NAME_ALLOW'] = name_allow
         if url_allow is not None:
             env['PLUGIN_URL_ALLOW'] = url_allow
         return subprocess.run(
@@ -135,38 +138,71 @@ class CheckSensitiveTests(unittest.TestCase):
         self.assertIn('vn.txt:1: vietnamese', output)
         self.assertNotIn('\u00fd', output)
 
-    def test_names_mode_detects_depth1_and_depth2_and_ignores_stoplist_short_missing(self):
+    def test_names_mode_depth1_only_globs_allow_stoplist_and_missing(self):
         name_root = pathlib.Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, name_root, True)
 
         proj1 = 'Fake' + 'Alpha' + 'Proj'
-        proj2 = 'Sub' + 'Beta' + 'Client'
-        (name_root / proj1 / proj2).mkdir(parents=True)
+        depth2_proj = 'Sub' + 'Beta' + 'Client'
+        allowed_proj = 'Allowed' + 'Repo' + 'Name'
+        glob_proj_a = 'Glob' + 'Gamma' + 'App'
+        glob_proj_b = 'Glob' + 'Delta' + 'Svc'
+
+        (name_root / proj1 / depth2_proj).mkdir(parents=True)
+        (name_root / allowed_proj).mkdir()
         (name_root / 'abc').mkdir()
         (name_root / '.hidden_proj').mkdir()
-        (name_root / 'backend' / 'scripts').mkdir(parents=True)
+
+        added_stoplist = [
+            'output', 'data', 'skills', 'logs', 'source', 'demo', 'content',
+            'chosen', 'secrets', 'plugins', 'docs', 'images', 'fonts', 'public',
+            'private', 'temp', 'tmp', 'cache', 'dist', 'out', 'bin', 'vendor',
+            'examples', 'sample', 'samples',
+        ]
+        for word in added_stoplist:
+            (name_root / word).mkdir()
+
+        glob_parent = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, glob_parent, True)
+        (glob_parent / 'ws_one' / glob_proj_a).mkdir(parents=True)
+        (glob_parent / 'ws_two' / glob_proj_b).mkdir(parents=True)
 
         missing_dir = name_root / 'does_not_exist'
-        name_dirs = os.pathsep.join([str(missing_dir), str(name_root)])
+        name_dirs = os.pathsep.join([str(missing_dir), str(name_root), str(glob_parent / 'ws_*')])
 
-        # Stoplist words, short names, dot names, and partial substrings are ignored.
-        clean_text = 'backend scripts abc hidden_proj x' + proj1.lower() + 'y\n'
+        # Depth-2 names, stoplist words, short names, dot names, partial substrings,
+        # and PLUGIN_NAME_ALLOW entries are all ignored; missing dir warns without crash.
+        clean_text = (
+            ' '.join(added_stoplist)
+            + ' ' + depth2_proj.lower()
+            + ' ' + allowed_proj.lower()
+            + ' abc hidden_proj x' + proj1.lower() + 'y\n'
+        )
         (self.temp / 'safe.txt').write_text(clean_text, encoding='utf-8')
         self._git('add', 'safe.txt')
-        res_clean = self._run_scan(name_dirs=name_dirs)
+        res_clean = self._run_scan(
+            name_dirs=name_dirs,
+            name_allow='other_name, ' + allowed_proj.upper(),
+        )
         self.assertEqual(0, res_clean.returncode, res_clean.stderr)
         self.assertIn('warning:', res_clean.stderr.lower())
 
-        # Whole-word case-insensitive matches for depth-1 and depth-2 names are flagged.
-        hit_text = 'Working on ' + proj1.lower() + ' and ' + proj2.upper() + '.\n'
-        (self.temp / 'hit.txt').write_text(hit_text, encoding='utf-8')
-        self._git('add', 'hit.txt')
-        res_hit = self._run_scan(name_dirs=name_dirs)
-        self.assertEqual(1, res_hit.returncode)
-        output = res_hit.stdout + res_hit.stderr
-        self.assertIn('hit.txt:1: project-name', output)
-        self.assertNotIn(proj1.lower(), output)
-        self.assertNotIn(proj2.lower(), output)
+        # Whole-word case-insensitive matches for depth-1 names (direct & glob-expanded) are flagged,
+        # and the matched name never appears in output.
+        for idx, target in enumerate((proj1, glob_proj_a, glob_proj_b)):
+            hit_file = self.temp / f'hit_{idx}.txt'
+            hit_file.write_text('Working on ' + target.upper() + ' today.\n', encoding='utf-8')
+            self._git('add', hit_file.name)
+            res_hit = self._run_scan(
+                name_dirs=name_dirs,
+                name_allow=allowed_proj,
+            )
+            self.assertEqual(1, res_hit.returncode)
+            output = res_hit.stdout + res_hit.stderr
+            self.assertIn(hit_file.name + ':1: project-name', output)
+            self.assertNotIn(target.lower(), output)
+            self.assertNotIn(target.upper(), output)
+            self._git('rm', '-f', hit_file.name)
 
     def test_history_finds_deleted_secret_and_flags_non_noreply_author(self):
         old_secret = 'sk-' + 'z' * 24
