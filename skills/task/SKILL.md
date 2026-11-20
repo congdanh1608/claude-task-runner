@@ -10,7 +10,7 @@ You are the coordinator. Workers (Codex, OpenCode, Gemini, Perch, and Relay) exe
 `task` is not on PATH: always run it as `~/.claude/scripts/task …` (every `task` below means that path).
 
 ## Do it yourself, or delegate
-- Yourself: read the files, logs and configs you need to write a correct brief; a known edit of 2 lines or fewer; up to 3 read-only commands with bounded output to answer directly (production SSH is excluded; see below).
+- Yourself: read the files, logs and configs you need to write a correct brief; a known edit of 2 lines or fewer; up to 3 read-only commands with bounded output to answer directly (production SSH is delegated; see below).
 - Delegate: everything else (search across files, code changes, tests, ops, deploys, reviews). One task = one goal with its own done criteria.
 - A bug fix is never a "known 2-line edit", however small the diff: it goes to a worker under **Bug fixes** below.
 - Asked why something was or was not delegated: cite the rule that applied.
@@ -95,7 +95,7 @@ A bug that truly cannot be tested (pure native or visual): the fix brief says so
 
 ## Builds, tests, emulator
 - Standalone builds, suites, analyzers and "does it build?" checks go to Luna (`--model luna --row code`). An implementation task stays with its assigned Hydrogen (or fallback) worker, which runs relevant tests/analyzers as done criteria. Deploys and ops go to Luna (`--model luna --row code --effort low`).
-- Production SSH requires an explicitly pinned Codex task: `task start codex <id> <brief> --model <luna|sol> --pinned`. If Codex is off, use the Claude-mode worker only when all three CLIs are off; otherwise block and report, never use row fallback. Never use DeepSeek, Flash or free providers. Workers may use a documented SSH alias (credential use, never inspection/printing). SSH briefs name the host/alias, purpose, permitted actions and needed non-secret output fields; bound output by bytes and lines. A permission denial is a blocker, never a reason to copy keys or switch provider.
+- Production SSH may run on any worker on the owner's own paid accounts (Codex, Gemini, OpenCode paid models, Claude mode), including a normal row start when the brief names the SSH check. It never runs on third-party gateway or free workers: `perch-deepseek`, `deepseek-free`, `relay-*`, `chatanywhere`. Pick the worker by the usual table (an ssh check is a short `code` row task; Codex Luna is the default for ops and deploys). Workers may use a documented SSH alias (credential use, never inspection/printing). SSH briefs name the host/alias, purpose, permitted actions and needed non-secret output fields; bound output by bytes and lines. A permission denial is a blocker, never a reason to copy keys or switch provider.
 - The brief says: on a build or test failure, read the error and fix it within the brief's scope, at most 2 attempts; still failing → stop with FAIL, the error excerpt (≤30 lines) and a root-cause hypothesis.
 - That FAIL escalates to Carbon with a new id (`<id>-carbon`), then Sol (`<id>-sol`) if Carbon also fails, read-only first: the brief carries the excerpt and hypothesis. Main reads the investigator's conclusion, not the logs, then decides the fix task. Sol FAIL → stop and ask the user.
 
