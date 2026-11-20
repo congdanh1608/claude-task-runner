@@ -1,0 +1,1 @@
+These small fixtures retain only event fields needed by the watchdog. The Gemini and Codex records derive from the incident logs `sample-gemini.log` and `sample-codex.log`; command text, output, and paths were removed. The stderr marker has normalized duration/count values. OpenCode records exercise the documented running/completed tool-part shape.

@@ -1,0 +1,56 @@
+#!/bin/bash
+fake_home="$(cd "$CLAUDE_CONFIG_DIR/../../.." && pwd)"
+FAKE_DIR="$fake_home/.relay-fake"
+mkdir -p "$FAKE_DIR"
+n=$(ls "$FAKE_DIR"/argv.* 2>/dev/null | wc -l | tr -d ' ')
+n=$((n + 1))
+printf '%s\0' "$@" > "$FAKE_DIR/argv.$n"
+record_model=0
+for arg in "$@"; do
+  if [ "$record_model" = 1 ]; then
+    printf '%s' "$arg" > "$FAKE_DIR/model.$n"
+    break
+  fi
+  [ "$arg" = "--model" ] && record_model=1
+done
+pwd > "$FAKE_DIR/cwd.$n"
+printf '%s' "${TASK_RUNNER_ROLE:-}" > "$FAKE_DIR/role.$n"
+[ -n "${ANTHROPIC_AUTH_TOKEN:-}" ] && printf yes > "$FAKE_DIR/auth.$n" || printf no > "$FAKE_DIR/auth.$n"
+[ -n "${ANTHROPIC_API_KEY:-}" ] && printf yes > "$FAKE_DIR/api-key.$n" || printf no > "$FAKE_DIR/api-key.$n"
+[ -n "${ANTHROPIC_BASE_URL:-}" ] && printf yes > "$FAKE_DIR/url.$n" || printf no > "$FAKE_DIR/url.$n"
+[ "${ANTHROPIC_BASE_URL:-}" = "https://relay.invalid" ] && printf yes > "$FAKE_DIR/baseurlmatch.$n" || printf no > "$FAKE_DIR/baseurlmatch.$n"
+printf '%s' "${CLAUDE_CONFIG_DIR:-}" > "$FAKE_DIR/config.$n"
+env | cut -d= -f1 | sort > "$FAKE_DIR/envnames.$n"
+mode=""
+for arg in "$@"; do
+  case "$arg" in
+    *RELAY_FAKE_MODE:leak*) mode=leak ;;
+    *RELAY_FAKE_MODE:bad_exit*) mode=bad_exit ;;
+    *RELAY_FAKE_MODE:clean_nonzero*) mode=clean_nonzero ;;
+    *RELAY_FAKE_MODE:auth*) mode=auth ;;
+    *RELAY_FAKE_MODE:quota*) mode=quota ;;
+  esac
+done
+if [ "$mode" = "leak" ]; then
+  printf 'stdout credential %s\n' "${ANTHROPIC_AUTH_TOKEN:-}"
+  printf 'stderr credential %s\n' "${ANTHROPIC_AUTH_TOKEN:-}" >&2
+  printf '{"type":"result","subtype":"error","is_error":true,"result":"credential %s","session_id":"session-%s"}\n' "${ANTHROPIC_AUTH_TOKEN:-}" "$n"
+  exit 1
+fi
+if [ "$mode" = "bad_exit" ]; then
+  printf '{"type":"result","subtype":"error_during_execution","is_error":false,"result":"STATE: DONE\\nANSWER: should not finish\\nEVIDENCE: fake:1\\nMISSING:","session_id":"session-%s"}\n' "$n"
+  exit 7
+fi
+if [ "$mode" = "clean_nonzero" ]; then
+  printf '{"type":"result","subtype":"success","is_error":false,"result":"STATE: DONE\\nANSWER: clean result\\nEVIDENCE: fake:1\\nMISSING:","session_id":"session-%s"}\n' "$n"
+  exit 9
+fi
+if [ "$mode" = "auth" ]; then
+  printf '{"type":"result","subtype":"error","is_error":true,"result":"authentication failed","session_id":"session-%s"}\n' "$n"
+  exit 1
+fi
+if [ "$mode" = "quota" ]; then
+  printf '{"type":"result","subtype":"error","is_error":true,"result":"429 rate limit exceeded","session_id":"session-%s"}\n' "$n"
+  exit 1
+fi
+printf '{"type":"result","subtype":"success","is_error":false,"result":"STATE: DONE\\nANSWER: fake relay turn\\nEVIDENCE: fake:1\\nMISSING:","session_id":"session-%s"}\n' "$n"

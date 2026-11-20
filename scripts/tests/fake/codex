@@ -1,0 +1,5 @@
+#!/bin/bash
+. "$(dirname "$0")/_common.sh"
+k=$(ls "$FAKE_DIR"/key.* 2>/dev/null | wc -l | tr -d ' ')
+printf '%s' "${CHATANYWHERE_API_KEY:-}" > "$FAKE_DIR/key.$((k + 1))"
+fake_main codex "$@"

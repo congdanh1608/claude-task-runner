@@ -1,0 +1,237 @@
+#!/bin/bash
+# Fake Perch CLI for unit tests. Behaviour comes from FAKE_MODE:
+#   ok (default) | nocontract | quota | badflag | rejected
+#   | auth | stderr_limit | preamble | ok_limit | allowance_fail | work_fail | usage_fail
+#   | errorcode_limit | segment_limit | model_blocked
+#   | structured_quota | structured_rejected | structured_rejected_noname | structured_auth
+#   | stderr_auth_ok | failure_stderr_limit | stderr_usage_ok_nocontract
+# It records argv.N / cwd.N / role.N like the other fake CLIs and prints one
+# pretty JSON object, the same shape `perch run --json` uses.
+here="$(cd "$(dirname "$0")" && pwd)"
+n=$(ls "$FAKE_DIR"/argv.* 2>/dev/null | wc -l | tr -d ' ')
+n=$((n + 1))
+printf '%s\0' "$@" > "$FAKE_DIR/argv.$n"
+pwd > "$FAKE_DIR/cwd.$n"
+printf '%s' "${TASK_RUNNER_ROLE:-}" > "$FAKE_DIR/role.$n"
+
+mode="${FAKE_MODE:-ok}"
+prompt="${2:-}"
+answer="${FAKE_ANSWER:-all good $n}"
+
+if [ "$1" = "run" ] && [ "$prompt" = "/usage" ]; then
+  if [ "$mode" = "usage_fail" ]; then
+    echo "usage failed" >&2
+    exit 1
+  fi
+  python3 - <<'PY'
+import json
+text = "\n".join([
+    "Perch Tokens",
+    "- Plan: Starter · 20,000 PT / month (up to $20 API usage)",
+    "- Month  ████░ 9 PT / 20,000 PT · 0%",
+    "- 5h  12% · used · next usage frees up in 3 h 20 min",
+    "- Weekly  34% · used · next usage frees up in 2 d 4 h",
+    "- Activity  3 chats this month · 9 PT in 7 days · 1,200 model tokens",
+])
+print(json.dumps({"ok": True, "status": "completed", "prompt": "/usage", "cwd": "/tmp",
+                  "threadId": "THREAD-perch-usage", "runId": "run-usage", "durationMs": 1,
+                  "assistantText": text, "events": [], "segments": [], "contextSnapshot": None},
+                 indent=2))
+PY
+  exit 0
+fi
+
+if [ "$mode" = "badflag" ] || [ "$mode" = "rejected" ]; then
+  echo "Unknown model: nope. Valid models: deepseek-flash-starter" >&2
+  exit 1
+fi
+
+if [ "$mode" = "auth" ]; then
+  echo "Not signed in. Run perch login to continue." >&2
+  exit 1
+fi
+
+if [ "$mode" = "stderr_limit" ]; then
+  echo "turn_rate_limited: wait a moment and retry" >&2
+  exit 1
+fi
+
+if [ "$mode" = "preamble" ]; then
+  echo "Perch CLI 2.4.126"
+  python3 - "$n" "$answer" <<'PY'
+import json
+import sys
+n, answer = sys.argv[1:3]
+text = "STATE: DONE\nANSWER: %s\nEVIDENCE: fake:1\nMISSING:" % answer
+print(json.dumps({"ok": True, "status": "completed", "prompt": "brief", "cwd": ".",
+                  "threadId": "THREAD-perch-1", "runId": "run-" + n, "durationMs": 10,
+                  "assistantText": text,
+                  "events": [{"type": "tool_output", "output": "PERCH_EVENTS_SENTINEL"}],
+                  "segments": [], "contextSnapshot": None}, indent=2))
+PY
+  exit 0
+fi
+
+if [ "$mode" = "ok_limit" ]; then
+  python3 - <<'PY'
+import json
+text = "STATE: DONE\nANSWER: turn_rate_limited is the code this task documented\nEVIDENCE: fake:1\nMISSING:"
+print(json.dumps({"ok": True, "status": "completed", "prompt": "brief", "cwd": ".",
+                  "threadId": "THREAD-perch-1", "runId": "run-limit", "durationMs": 3,
+                  "assistantText": text,
+                  "events": [], "segments": [], "contextSnapshot": None}, indent=2))
+PY
+  exit 0
+fi
+
+if [ "$mode" = "errorcode_limit" ]; then
+  python3 - <<'PY'
+import json
+print(json.dumps({"ok": False, "status": "failed", "prompt": "brief", "cwd": ".",
+                  "threadId": "THREAD-perch-1", "runId": "run-code", "durationMs": 3,
+                  "assistantText": "", "errorCode": "turn_rate_limited",
+                  "events": [], "segments": [], "contextSnapshot": None}, indent=2))
+PY
+  exit 1
+fi
+
+if [ "$mode" = "segment_limit" ]; then
+  python3 - <<'PY'
+import json
+print(json.dumps({"ok": False, "status": "failed", "prompt": "brief", "cwd": ".",
+                  "threadId": "THREAD-perch-1", "runId": "run-segment", "durationMs": 3,
+                  "assistantText": "",
+                  "events": [], "segments": [{"kind": "error",
+                                              "limit": {"code": "turn_rate_limited"}}],
+                  "contextSnapshot": None}, indent=2))
+PY
+  exit 1
+fi
+
+if [ "$mode" = "model_blocked" ]; then
+  python3 - <<'PY'
+import json
+print(json.dumps({"ok": False, "status": "failed", "prompt": "brief", "cwd": ".",
+                  "threadId": "THREAD-perch-1", "runId": "run-blocked", "durationMs": 3,
+                  "assistantText": "", "error": "starter_model_blocked",
+                  "errorCode": "starter_model_blocked",
+                  "events": [], "segments": [], "contextSnapshot": None}, indent=2))
+PY
+  exit 1
+fi
+
+if [ "$mode" = "structured_quota" ]; then
+  python3 - <<'PY'
+import json
+print(json.dumps({"ok": False, "status": "failed", "errorCode": "turn_rate_limited"}, indent=2))
+PY
+  exit 1
+fi
+
+if [ "$mode" = "structured_rejected" ]; then
+  python3 - <<'PY'
+import json
+print(json.dumps({"ok": False, "status": "failed", "errorCode": "starter_model_blocked",
+                  "validModels": ["deepseek-flash-starter"]}, indent=2))
+PY
+  exit 1
+fi
+
+if [ "$mode" = "structured_rejected_noname" ]; then
+  python3 - <<'PY'
+import json
+print(json.dumps({"ok": False, "status": "failed", "errorCode": "model_restricted"}, indent=2))
+PY
+  exit 1
+fi
+
+if [ "$mode" = "structured_auth" ]; then
+  python3 - <<'PY'
+import json
+print(json.dumps({"ok": False, "status": "failed", "error": "Not signed in"}, indent=2))
+PY
+  exit 1
+fi
+
+if [ "$mode" = "stderr_auth_ok" ]; then
+  echo "authentication token refreshed" >&2
+  python3 - <<'PY'
+import json
+text = "STATE: DONE\nANSWER: successful turn\nEVIDENCE: fake:1\nMISSING:"
+print(json.dumps({"ok": True, "status": "completed", "assistantText": text,
+                  "threadId": "THREAD-perch-1", "events": []}, indent=2))
+PY
+  exit 0
+fi
+
+if [ "$mode" = "failure_stderr_limit" ]; then
+  echo "turn_rate_limited: wait a moment and retry" >&2
+  python3 - <<'PY'
+import json
+print(json.dumps({"ok": False, "status": "failed", "error": "boom"}, indent=2))
+PY
+  exit 1
+fi
+
+if [ "$mode" = "stderr_usage_ok_nocontract" ]; then
+  echo "usage limit: 12 of 100 requests" >&2
+  python3 - <<'PY'
+import json
+print(json.dumps({"ok": True, "status": "completed", "assistantText": "forgot the block",
+                  "threadId": "THREAD-perch-1", "events": []}, indent=2))
+PY
+  exit 0
+fi
+
+if [ "$mode" = "allowance_fail" ]; then
+  python3 - <<'PY'
+import json
+print(json.dumps({"ok": False, "status": "failed", "prompt": "brief", "cwd": ".",
+                  "threadId": "THREAD-perch-1", "runId": "run-allowance", "durationMs": 3,
+                  "assistantText": "", "error": "Monthly allowance spent for this period.",
+                  "events": [], "segments": [], "contextSnapshot": None}, indent=2))
+PY
+  exit 1
+fi
+
+if [ "$mode" = "work_fail" ]; then
+  python3 - <<'PY'
+import json
+print(json.dumps({"ok": False, "status": "failed", "prompt": "brief", "cwd": ".",
+                  "threadId": "THREAD-perch-1", "runId": "run-work", "durationMs": 9,
+                  "assistantText": "Edited 2 files, then the model failed.",
+                  "error": "model failed after edits",
+                  "events": [{"type": "tool_call_completed", "toolName": "edit"}],
+                  "segments": [], "contextSnapshot": None}, indent=2))
+PY
+  exit 1
+fi
+
+if [ "$mode" = "quota" ]; then
+  python3 - <<'PY'
+import json
+print(json.dumps({"ok": False, "status": "failed", "prompt": "brief", "cwd": ".",
+                  "threadId": "THREAD-perch-1", "runId": "run-quota", "durationMs": 5,
+                  "assistantText": "",
+                  "error": "turn_rate_limited: Your plan's Perch turn rate limit has been reached.",
+                  "events": [{"type": "tool_output", "output": "PERCH_EVENTS_SENTINEL"}],
+                  "segments": [], "contextSnapshot": None}, indent=2))
+PY
+  exit 1
+fi
+
+if [ "$mode" = "nocontract" ]; then
+  text="forgot the block"
+else
+  text=$(printf 'Preflight ok.\nSTATE: DONE\nANSWER: %s\nEVIDENCE: fake:1, exit 0\nMISSING:' "$answer")
+fi
+python3 - "$n" "$text" <<'PY'
+import json
+import sys
+n, text = sys.argv[1:3]
+print(json.dumps({"ok": True, "status": "completed", "prompt": "brief", "cwd": ".",
+                  "threadId": "THREAD-perch-1", "runId": "run-" + n, "durationMs": 10,
+                  "assistantText": text,
+                  "events": [{"type": "tool_output", "output": "PERCH_EVENTS_SENTINEL"}],
+                  "segments": [], "contextSnapshot": None}, indent=2))
+PY

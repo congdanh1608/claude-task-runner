@@ -1,0 +1,14 @@
+{
+  "name": "task-runner",
+  "description": "Resumable worker tasks for Claude Code",
+  "owner": {
+    "name": "congdanh1608"
+  },
+  "plugins": [
+    {
+      "name": "task-runner",
+      "source": "./",
+      "description": "Resumable worker tasks (Codex, OpenCode, Gemini)"
+    }
+  ]
+}
