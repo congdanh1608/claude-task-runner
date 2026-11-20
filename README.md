@@ -57,6 +57,22 @@ For example, test the Gemini Flash model or Codex Luna:
 
 See [docs/workers.md](docs/workers.md) for full testing and configuration options.
 
+## Quick command reference
+
+| Command | What it does |
+| --- | --- |
+| `task workers` | Show `on`/`off` switches for all worker CLIs and model aliases |
+| `task on <name>` / `task off <name>` | Enable or disable a worker CLI or model alias |
+| `task test <worker> [--resume]` | Smoke-test a worker (and optionally session resume) |
+| `task start <id> <brief> --row <row>` | Start a task in the foreground and wait for its status report |
+| `task reply <id> <message>` | Send a follow-up message to a `NEED-INPUT` session |
+| `task status <id>` | Print a task's current state, report, timing, and raw log path |
+| `task list` | List all recorded tasks and their states |
+| `task quota [--md]` | Show quota signals and limits for all configured workers |
+| `task clean sessions` | Delete transcripts and file-history for archived Claude sessions |
+
+Full syntax, flags and exit codes: [docs/commands.md](docs/commands.md).
+
 ## Built-in Skills
 
 The plugin registers three skills:
@@ -85,10 +101,11 @@ Integrations with external tools or plugins (such as custom statuslines, progres
 - Never include personal, client, or project names, hostnames, IPs, emails, or absolute machine paths.
 - Commit only with a GitHub noreply identity (`<id>+<user>@users.noreply.github.com`) and write in English only.
 - Enable the pre-commit hook in each clone: `git config core.hooksPath .githooks`.
-- Run `python3 scripts/check-sensitive.py --all --history` with `PLUGIN_DENYLIST` (file with one forbidden literal per line) and `PLUGIN_NAME_DIRS` (directories whose subfolder names must never appear) set.
+- Run `python3 scripts/check-sensitive.py --all --history` with `PLUGIN_DENYLIST` (file with one forbidden literal per line) and `PLUGIN_NAME_DIRS` (directories (globs allowed, for example `/work/clients/*`) whose immediate subfolder names must never appear anywhere in the repo or its history; `PLUGIN_NAME_ALLOW` is an optional comma-separated list of names to ignore (such as this repo's own name)) set.
 - Releases go only through `scripts/release.sh`, which refuses to run without those two variables and scans the whole history before it commits.
 
 ## Documentation
 
+- [Command Reference](docs/commands.md): full `task` subcommand syntax, flags, exit codes, walk-through, and troubleshooting.
 - [Worker Configuration and Management](docs/workers.md): switches, model mappings, fallback tables, and optional workers.
 - [Relay Worker Setup](docs/relay.md): configuring external Claude API gateways, credentials, model aliases, and limits.
