@@ -2,7 +2,7 @@
 
 The `task` CLI (`~/.claude/scripts/task`, backed by `scripts/task.py`) runs worker CLIs (`codex`, `opencode`, `agy` for Gemini, `perch`, and `relay`) in resumable foreground sessions with watchdog supervision and automatic fallback.
 
-For worker configuration, model tables, and switches, see [docs/workers.md](workers.md). For external Claude API gateway setup, see [docs/relay.md](relay.md).
+For worker configuration, model tables, and switches, see [docs/workers.md](workers.md). For how rows resolve to models, overrides, and quota behaviour, see [docs/models.md](models.md). For external Claude API gateway setup, see [docs/relay.md](relay.md).
 
 ---
 

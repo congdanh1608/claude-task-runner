@@ -2,7 +2,7 @@
 
 `task` delegates work to autonomous worker CLIs (`gemini`, `codex`, `opencode`, `perch`, `relay`). Worker sessions are resumable, meaning follow-up instructions and review fixes continue the existing session without starting over.
 
-All commands run via `~/.claude/scripts/task`.
+All commands run via `~/.claude/scripts/task`. For how task rows select models, overrides, and quota fallbacks, see [docs/models.md](models.md).
 
 ## Worker Switches
 
