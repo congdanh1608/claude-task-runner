@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.35.3
+- Docs: prod SSH allowed on any owner-paid worker; third-party gateway and free workers excluded
+
 ## 2.35.2
 - Docs: PATH setup for macOS, Linux and Windows; model assignment guide (docs/models.md)
 
