@@ -66,11 +66,8 @@ class QuotaTest(unittest.TestCase):
             self.assertEqual(2, len(rows))
             self.assertEqual(["75%", "30%"], [row[2] for row in rows])
 
-    def test_log_parser_and_empty_sources(self):
+    def test_empty_sources_and_unsupported_rows(self):
         with tempfile.TemporaryDirectory() as root:
-            log = pathlib.Path(root) / "runner.log"
-            log.write_text(json.dumps({"event": "assistant_message", "text": "added quota parser tests"}) + "\n")
-            self.assertEqual([], quota.log_hits([str(log)], ("quota",), "opencode"))
             with mock.patch.object(quota, "agy_usage", side_effect=ValueError("offline")), \
                     mock.patch.object(quota, "claude_usage_rows", return_value=[
                         ("Claude", "Claude Code", "n/a (usage unavailable)", "n/a", "n/a", "on", "n/a")]), \
@@ -80,9 +77,10 @@ class QuotaTest(unittest.TestCase):
                                        state_path=str(pathlib.Path(root) / "missing-state"),
                                        logs=[], gemini_log=str(pathlib.Path(root) / "missing-gemini"), switches={})
             self.assertEqual(8, len(rows))
-            self.assertIn("no quota error seen", rows[-1][-1])
-            free = [row for row in rows if row[0] == "OpenCode free"]
-            self.assertEqual("free, no published cap", free[0][-1])
+            self.assertEqual("n/a (source unavailable)", rows[-1][-1])
+            for key in ("OpenCode", "OpenCode free", "Relay", "ChatAnywhere"):
+                row = next(r for r in rows if r[0] == key)
+                self.assertEqual("not supported", row[2], key)
 
     def test_agy_quota_fixture(self):
         fixture = SCRIPT / "tests/fixtures/agy-quota.jsonl"
@@ -104,7 +102,7 @@ class QuotaTest(unittest.TestCase):
         self.assertEqual("weekly", quota.codex_window(10080))
         self.assertEqual("5h", quota.codex_window(300))
 
-    def test_relay_row_is_unmetered_and_switchable(self):
+    def test_relay_row_is_not_supported_and_switchable(self):
         switches = {"relay": False}
         with mock.patch.object(quota, "codex_rows", return_value=[]), \
                 mock.patch.object(quota, "agy_usage", return_value=[]), \
@@ -114,12 +112,13 @@ class QuotaTest(unittest.TestCase):
                                   side_effect=AssertionError("external CLI must not run")) as run:
             rows, _ = quota.render(root="/nonexistent", state_path="/nonexistent", logs=[],
                                    gemini_log="/nonexistent", switches=switches)
-            run.assert_called_once_with(["opencode", "stats"], capture_output=True, text=True, timeout=20)
+            run.assert_not_called()
         relay = next(row for row in rows if row[0] == "Relay")
-        self.assertEqual(("Relay", "relay-sonnet", "n/a", "n/a", "n/a", "off",
-                          "n/a (no quota API)"), relay)
+        self.assertEqual(("Relay", "relay-sonnet", "not supported", "n/a", "n/a", "off",
+                          "not supported"), relay)
         table = quota.render_table([relay], switches)
         self.assertIn("Relay", table)
+        self.assertIn("not supported", table)
         self.assertIn("off", table)
 
     def test_missing_statusline_has_actionable_fallback_failure(self):
@@ -280,20 +279,11 @@ class QuotaTest(unittest.TestCase):
                 run.assert_called_once()
                 self.assertEqual(["69%", "44%"], [row[2] for row in rows])
 
-    def test_deadline_and_error_event_attribution(self):
+    def test_deadline_expires(self):
         deadline = quota.Deadline(0.001)
-        import time
         time.sleep(0.003)
         with self.assertRaises(TimeoutError):
             deadline.remaining()
-        with tempfile.TemporaryDirectory() as root:
-            path = pathlib.Path(root) / "task.log"
-            path.write_text("\n".join((
-                json.dumps({"event": "assistant_message", "text": "quota"}),
-                json.dumps({"event": "error", "worker": "gemini", "error": "429 quota"}),
-                json.dumps({"event": "error", "worker": "opencode", "error": "429 quota"}))) + "\n")
-            self.assertEqual(1, len(quota.log_hits([str(path)], ("429", "quota"), "opencode")))
-            self.assertEqual(1, len(quota.log_hits([str(path)], ("429", "quota"), "gemini")))
 
     def test_claude_switch_independent_of_codex(self):
         self.assertEqual("on", quota.switch_state("Claude Code", {"luna": False, "sol": False}))
@@ -386,14 +376,6 @@ class QuotaTest(unittest.TestCase):
                                     now=after_reset)
             self.assertEqual("100% (reset)", rows[0][2])
 
-    def test_opencode_token_total_is_compact(self):
-        self.assertEqual("5.4B tok", quota.parse_opencode_tokens("5.4b tokens"))
-        self.assertEqual("5.4B tok", quota.parse_opencode_tokens(
-            "1.8k prompts · 64.5k steps · 5.4b tokens"))
-        self.assertEqual("1.2M tok", quota.parse_opencode_tokens("Total tokens: 1,234,567"))
-        with self.assertRaises(ValueError):
-            quota.parse_opencode_tokens("no totals here")
-
     def test_md_is_alias_for_default_layout(self):
         rows = [("Codex", "luna+sol", "10%", "5h", "2026-10-15 00:00", "on", "session")]
         expected = quota.render_table(rows, {"luna": True, "sol": True})
@@ -408,30 +390,45 @@ class QuotaTest(unittest.TestCase):
         self.assertEqual(expected, plain)
         self.assertEqual(plain, md)
 
-    def test_log_hits_ignores_non_object_json_lines(self):
+    def test_render_never_scans_logs_or_runs_opencode(self):
         with tempfile.TemporaryDirectory() as root:
             log = pathlib.Path(root) / "runner.log"
-            log.write_text('"a bare string"\n' + json.dumps(
-                {"event": "error", "worker": "opencode", "error": "429 quota"}) + "\n")
-            self.assertEqual(1, len(quota.log_hits([str(log)], ("429",), "opencode")))
+            log.write_text("\n".join((
+                json.dumps({"event": "error", "worker": "opencode", "error": "429 quota"}),
+                json.dumps({"event": "error", "worker": "opencode", "error": "FreeUsageLimitError"}))) + "\n")
+            real_open = open
+            opened = []
 
-    def test_render_opencode_shows_token_total(self):
-        stats = mock.Mock(returncode=0, stdout="1.8k prompts · 64.6k steps · 5.5b tokens")
-        claude = [("Claude", "Claude Code", "16%", "weekly", "n/a", "on", "x")]
-        with mock.patch.object(quota, "agy_usage", side_effect=ValueError("offline")), \
-                mock.patch.object(quota, "claude_usage_rows", return_value=claude), \
-                mock.patch.object(quota, "perch_usage", side_effect=ValueError("offline")), \
-                mock.patch.object(quota.subprocess, "run", return_value=stats):
-            rows, _ = quota.render(root="/nonexistent", state_path="/nonexistent", logs=[],
-                                   gemini_log="/nonexistent", switches={})
-        opencode = next(row for row in rows if row[0] == "OpenCode")
-        self.assertEqual("5.5B tok", opencode[2])
+            def guarded_open(file, *args, **kwargs):
+                opened.append(str(file))
+                return real_open(file, *args, **kwargs)
 
-    def test_credential_path_is_not_interpreted_as_log(self):
-        with tempfile.TemporaryDirectory() as root:
-            credential = pathlib.Path(root) / "credential.json"
-            credential.write_text(json.dumps({"event": "error", "worker": "opencode", "error": "429 quota"}))
-            self.assertEqual([], quota.log_hits([str(credential)], ("429", "quota"), "opencode"))
+            with mock.patch.object(quota, "codex_rows", return_value=[]), \
+                    mock.patch.object(quota, "claude_usage_rows", return_value=[]), \
+                    mock.patch.object(quota, "perch_usage", return_value={}), \
+                    mock.patch.object(quota, "agy_usage", return_value=[]), \
+                    mock.patch.object(quota.subprocess, "run",
+                                      side_effect=AssertionError("opencode must not run")) as run, \
+                    mock.patch("builtins.open", side_effect=guarded_open):
+                rows, switches = quota.render(root="/nonexistent", state_path="/nonexistent",
+                                              logs=[str(log)], gemini_log="/nonexistent",
+                                              switches={"deepseek": True, "deepseek-free": False,
+                                                        "relay": True, "chatanywhere": False})
+            run.assert_not_called()
+            self.assertFalse(any(str(log) in path for path in opened), opened)
+            expected = {
+                "OpenCode": ("OpenCode", "opencode-go/deepseek-v4.1-flash", "not supported", "n/a", "n/a", "on", "not supported"),
+                "OpenCode free": ("OpenCode free", "opencode/deepseek-v4.1-flash-free", "not supported", "n/a", "n/a", "off", "not supported"),
+                "Relay": ("Relay", "relay-sonnet", "not supported", "n/a", "n/a", "on", "not supported"),
+                "ChatAnywhere": ("ChatAnywhere", "gpt-6-luna", "not supported", "n/a", "n/a", "off", "not supported"),
+            }
+            for key, want in expected.items():
+                self.assertEqual(want, next(r for r in rows if r[0] == key))
+            table = quota.render_table(rows, switches)
+            self.assertIn("opencode-go/deepseek-v4.1-flash   | not supported | -", table)
+            self.assertIn("opencode/deepseek-v4.1-flash-free | not supported | -", table)
+            self.assertIn("relay-sonnet                      | not supported | -", table)
+            self.assertIn("gpt-6-luna                        | not supported | -", table)
 
     def test_perch_usage_parser_rows_and_table(self):
         raw = ("Perch Tokens\n"
@@ -609,16 +606,11 @@ class QuotaTest(unittest.TestCase):
             time.sleep(delay)
             return [("Gemini", "gemini", "90%", "weekly", "n/a", "on", "x")]
 
-        def slow_opencode(*_args, **_kwargs):
-            time.sleep(delay)
-            return mock.Mock(returncode=0, stdout="1.0b tokens")
-
         with mock.patch.object(quota, "codex_rows", return_value=[
                     ("Codex", "luna+sol", "95%", "5h", "n/a", "on", "x")]), \
                 mock.patch.object(quota, "claude_usage_rows", side_effect=slow_claude), \
                 mock.patch.object(quota, "perch_usage", side_effect=slow_perch), \
-                mock.patch.object(quota, "agy_usage", side_effect=slow_agy), \
-                mock.patch.object(quota.subprocess, "run", side_effect=slow_opencode):
+                mock.patch.object(quota, "agy_usage", side_effect=slow_agy):
             start = time.monotonic()
             rows, _ = quota.render(root="/nonexistent", state_path="/nonexistent", logs=[],
                                    gemini_log="/nonexistent", switches={})
@@ -636,9 +628,7 @@ class QuotaTest(unittest.TestCase):
                     ("Claude", "Claude Code", "80%", "weekly", "n/a", "on", "x")]), \
                 mock.patch.object(quota, "perch_usage", side_effect=RuntimeError("boom")), \
                 mock.patch.object(quota, "agy_usage", return_value=[
-                    ("Gemini", "gemini", "90%", "weekly", "n/a", "on", "x")]), \
-                mock.patch.object(quota.subprocess, "run",
-                                  return_value=mock.Mock(returncode=0, stdout="1.0b tokens")):
+                    ("Gemini", "gemini", "90%", "weekly", "n/a", "on", "x")]):
             rows, _ = quota.render(root="/nonexistent", state_path="/nonexistent", logs=[],
                                    gemini_log="/nonexistent", switches={})
         self.assertEqual(
@@ -650,34 +640,6 @@ class QuotaTest(unittest.TestCase):
             ("Perch", "deepseek-flash-starter", "n/a", "n/a", "n/a", "on", "n/a (source unavailable)"),
             perch,
         )
-
-    def test_render_opencode_and_free_scan_overlap(self):
-        delay = 0.3
-
-        def slow_log_hits(*_args, **_kwargs):
-            time.sleep(delay)
-            return []
-
-        def slow_opencode_stats(*_args, **_kwargs):
-            time.sleep(delay)
-            return mock.Mock(returncode=0, stdout="1.0b tokens")
-
-        with mock.patch.object(quota, "codex_rows", return_value=[]), \
-                mock.patch.object(quota, "claude_usage_rows", return_value=[]), \
-                mock.patch.object(quota, "perch_usage", return_value={}), \
-                mock.patch.object(quota, "agy_usage", return_value=[]), \
-                mock.patch.object(quota, "log_hits", side_effect=slow_log_hits) as hits_mock, \
-                mock.patch.object(quota.subprocess, "run", side_effect=slow_opencode_stats):
-            start = time.monotonic()
-            rows, _ = quota.render(root="/nonexistent", state_path="/nonexistent", logs=[],
-                                   gemini_log="/nonexistent", switches={})
-            elapsed = time.monotonic() - start
-        self.assertLess(elapsed, delay * 1.8)
-        self.assertEqual(2, hits_mock.call_count)
-        opencode = next(row for row in rows if row[0] == "OpenCode")
-        self.assertEqual("1B tok", opencode[2])
-        free = next(row for row in rows if row[0] == "OpenCode free")
-        self.assertEqual("free, no published cap", free[-1])
 
 
 if __name__ == "__main__":

@@ -2,7 +2,6 @@
 """Summarize worker quota signals from local, non-credential sources."""
 import concurrent.futures
 import datetime
-import glob
 import importlib.util
 import json
 import math
@@ -17,7 +16,6 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 HOME = os.path.expanduser("~")
-LOG_DIR = os.environ.get("TASK_LOG_DIR", os.path.join(HOME, ".claude/logs/task-runner"))
 MAX_SECONDS = 30.0
 CLAUDE_USAGE_CACHE_SECONDS = 60
 CLAUDE_STATUS_MAX_AGE = 15 * 60
@@ -387,38 +385,6 @@ def local_time(value):
     return datetime.datetime.fromtimestamp(parse_time(value)).astimezone().strftime("%Y-%m-%d %H:%M")
 
 
-def log_hits(paths, patterns, worker=None, deadline=None):
-    hits = []
-    for path in paths:
-        if deadline:
-            deadline.remaining()
-        if not path.endswith(".log"):
-            continue
-        try:
-            with open(path, errors="replace") as handle:
-                for line in handle:
-                    if deadline:
-                        deadline.remaining()
-                    try:
-                        event = json.loads(line)
-                    except ValueError:
-                        continue
-                    if not isinstance(event, dict):
-                        continue
-                    etype = str(event.get("type", "") or event.get("event", "")).lower()
-                    if worker and event.get("worker") != worker:
-                        continue
-                    if not (event.get("error") or "error" in etype or "fail" in etype):
-                        continue
-                    blob = json.dumps(event.get("error") or event.get("message") or event).lower()
-                    match = next((pattern for pattern in patterns if pattern in blob), None)
-                    if match:
-                        hits.append((os.path.getmtime(path), "quota signal: " + match))
-        except OSError:
-            pass
-    return sorted(hits, reverse=True)
-
-
 def _agy_groups(value):
     """Groups from either a command_result event or the final result event."""
     candidates = []
@@ -649,31 +615,6 @@ def agy_usage(deadline=None):
         return [tuple(row) for row in cached["rows"]]
 
 
-def compact_number(value, unit=""):
-    """5.4b -> 5.4B, 1,234,567 -> 1.2M."""
-    number = float(str(value).replace(",", ""))
-    number *= {"": 1.0, "k": 1e3, "m": 1e6, "b": 1e9}[unit.lower()]
-    for suffix, scale in (("B", 1e9), ("M", 1e6), ("K", 1e3)):
-        if number >= scale:
-            text = "%.1f" % (number / scale)
-            return text.rstrip("0").rstrip(".") + suffix
-    return "%d" % number
-
-
-def parse_opencode_tokens(raw):
-    """Token total from `opencode stats`, e.g. `1.2M tok`."""
-    match = re.search(r"([\d.,]+)\s*([kmb])\s*tokens?\b", raw, re.IGNORECASE)
-    if match:
-        return compact_number(match.group(1), match.group(2)) + " tok"
-    match = re.search(r"([\d,]+)\s*tokens?\b", raw, re.IGNORECASE)
-    if match:
-        return compact_number(match.group(1)) + " tok"
-    match = re.search(r"tokens?\s*[:=]\s*([\d,]+)", raw, re.IGNORECASE)
-    if match:
-        return compact_number(match.group(1)) + " tok"
-    raise ValueError("token total missing")
-
-
 def switch_state(model, switches):
     keys = {"luna+sol": ("luna", "sol"), "deepseek": ("deepseek",), "deepseek-free": ("deepseek-free",),
             "perch-deepseek": ("perch-deepseek",),
@@ -727,35 +668,16 @@ def _future_result(future, deadline):
     return future.result(timeout=deadline.remaining())
 
 
-def _opencode_stats_row(switches):
-    stats = subprocess.run(["opencode", "stats"], capture_output=True, text=True, timeout=20)
-    if stats.returncode != 0:
-        raise ValueError("opencode stats failed")
-    tokens = parse_opencode_tokens(stats.stdout)
-    return ("OpenCode", "opencode-go/deepseek-v4.1-flash", tokens,
-            "n/a", "n/a", switch_state("deepseek", switches),
-            "opencode stats (no quota API)")
-
-
 def render(root=None, state_path=None, logs=None, gemini_log=None, switches=None, deadline=None,
            codex_cache=None, perch_cache=None):
     deadline = deadline or Deadline()
     root = root or os.path.join(HOME, ".codex/sessions")
     state_path = state_path or os.path.join(HOME, ".claude/state/claude-rate.json")
-    logs = glob.glob(os.path.join(LOG_DIR, "*.log")) if logs is None else logs
-    gemini_log = gemini_log or os.path.join(HOME, ".gemini/antigravity-cli/cli.log")
     switches = switches if switches is not None else get_switches()
-    executor = concurrent.futures.ThreadPoolExecutor(max_workers=7)
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
     try:
         codex_future = executor.submit(codex_rows, root, switches, deadline, codex_cache)
         claude_future = executor.submit(claude_usage_rows, state_path)
-        opencode_hits_future = executor.submit(
-            log_hits, logs, ("429", "rate limit", "quota", "insufficient_quota"), "opencode", deadline
-        )
-        opencode_stats_future = executor.submit(_opencode_stats_row, switches)
-        free_hits_future = executor.submit(
-            log_hits, logs, ("freeusagelimiterror",), "opencode", deadline
-        )
         perch_future = executor.submit(perch_usage, deadline, perch_cache)
         agy_future = executor.submit(agy_usage, deadline)
 
@@ -770,49 +692,26 @@ def render(root=None, state_path=None, logs=None, gemini_log=None, switches=None
             claude_rows = [("Claude", "Claude Code", "n/a (usage unavailable)", "n/a", "n/a",
                             "on", "n/a (usage unavailable)")]
         rows.extend(tuple(row[:5]) + (switch_state("Claude Code", switches), row[6]) for row in claude_rows)
-        try:
-            hits = _future_result(opencode_hits_future, deadline)
-            if hits:
-                rows.append(("OpenCode", "opencode-go/deepseek-v4.1-flash", "last error", "n/a",
-                             local_time(hits[0][0]), switch_state("deepseek", switches), hits[0][1]))
-            else:
-                rows.append(_future_result(opencode_stats_future, deadline))
-        except Exception:
-            rows.append(("OpenCode", "n/a", "n/a", "n/a", "n/a", "on", "n/a (source unavailable)"))
-        free_model = "opencode/deepseek-v4.1-flash-free"
-        try:
-            free_hits = _future_result(free_hits_future, deadline)
-        except Exception:
-            free_hits = []
-        if free_hits:
-            rows.append(("OpenCode free", free_model, "last error", "n/a", local_time(free_hits[0][0]),
-                         switch_state("deepseek-free", switches), free_hits[0][1]))
-        else:
-            rows.append(("OpenCode free", free_model, "free", "n/a", "n/a",
-                         switch_state("deepseek-free", switches), "free, no published cap"))
+        rows.append(("OpenCode", "opencode-go/deepseek-v4.1-flash", "not supported", "n/a", "n/a",
+                     switch_state("deepseek", switches), "not supported"))
+        rows.append(("OpenCode free", "opencode/deepseek-v4.1-flash-free", "not supported", "n/a", "n/a",
+                     switch_state("deepseek-free", switches), "not supported"))
         try:
             rows.extend(perch_rows(_future_result(perch_future, deadline), switches))
         except Exception:
             rows.append(("Perch", "deepseek-flash-starter", "n/a", "n/a", "n/a",
                          switch_state("perch-deepseek", switches), "n/a (source unavailable)"))
-        rows.append(("Relay", "relay-sonnet", "n/a", "n/a", "n/a",
-                     switch_state("relay", switches), "n/a (no quota API)"))
-        rows.append(("ChatAnywhere", "gpt-6-luna", "n/a", "n/a", "n/a",
-                     switch_state("chatanywhere", switches), "free key: 100 req/day, 50k pts/week, no usage API"))
+        rows.append(("Relay", "relay-sonnet", "not supported", "n/a", "n/a",
+                     switch_state("relay", switches), "not supported"))
+        rows.append(("ChatAnywhere", "gpt-6-luna", "not supported", "n/a", "n/a",
+                     switch_state("chatanywhere", switches), "not supported"))
         try:
             agy_rows = _future_result(agy_future, deadline)
             for worker, model, used, window, resets, enabled, source in agy_rows:
                 model_name = "gemini" if worker == "Gemini" else "agy-3p"
                 rows.append((worker, model_name, used, window, resets, switch_state(model_name, switches), source))
         except Exception:
-            try:
-                hits = log_hits([gemini_log], ("429", "rate limit", "quota", "resource_exhausted"), "agy", deadline)
-                if hits:
-                    rows.append(("Gemini", "agy", "last error", "n/a", local_time(hits[0][0]), "on", hits[0][1]))
-                else:
-                    rows.append(("Gemini", "agy", "n/a", "n/a", "n/a", "on", "no quota error seen"))
-            except Exception:
-                rows.append(("Gemini", "n/a", "n/a", "n/a", "n/a", "on", "n/a (source unavailable)"))
+            rows.append(("Gemini", "agy", "n/a", "n/a", "n/a", "on", "n/a (source unavailable)"))
         return rows, switches
     finally:
         executor.shutdown(wait=False)
