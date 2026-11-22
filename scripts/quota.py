@@ -719,6 +719,31 @@ def codex_rows(root, switches, deadline=None, cache_path=None, now=None):
     return rows
 
 
+def _future_result(future, deadline):
+    # A ready future must not be discarded even if the deadline expired while
+    # waiting on another source.
+    if future.done():
+        return future.result()
+    return future.result(timeout=deadline.remaining())
+
+
+def _opencode_row(logs, switches, deadline):
+    try:
+        hits = log_hits(logs, ("429", "rate limit", "quota", "insufficient_quota"), "opencode", deadline)
+        if hits:
+            return ("OpenCode", "opencode-go/deepseek-v4.1-flash", "last error", "n/a",
+                    local_time(hits[0][0]), switch_state("deepseek", switches), hits[0][1])
+        stats = subprocess.run(["opencode", "stats"], capture_output=True, text=True, timeout=20)
+        if stats.returncode != 0:
+            raise ValueError("opencode stats failed")
+        tokens = parse_opencode_tokens(stats.stdout)
+        return ("OpenCode", "opencode-go/deepseek-v4.1-flash", tokens,
+                "n/a", "n/a", switch_state("deepseek", switches),
+                "opencode stats (no quota API)")
+    except Exception:
+        return ("OpenCode", "n/a", "n/a", "n/a", "n/a", "on", "n/a (source unavailable)")
+
+
 def render(root=None, state_path=None, logs=None, gemini_log=None, switches=None, deadline=None,
            codex_cache=None, perch_cache=None):
     deadline = deadline or Deadline()
@@ -727,74 +752,66 @@ def render(root=None, state_path=None, logs=None, gemini_log=None, switches=None
     logs = glob.glob(os.path.join(LOG_DIR, "*.log")) if logs is None else logs
     gemini_log = gemini_log or os.path.join(HOME, ".gemini/antigravity-cli/cli.log")
     switches = switches if switches is not None else get_switches()
-    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-    agy_future = executor.submit(agy_usage, deadline)
-    rows = []
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=5)
     try:
-        rows.extend(codex_rows(root, switches, deadline, codex_cache))
-    except Exception:
-        rows.append(("Codex", "n/a", "n/a", "n/a", "n/a", "on", "n/a (source unavailable)"))
-    claude_rows = claude_usage_rows(state_path)
-    rows.extend(tuple(row[:5]) + (switch_state("Claude Code", switches), row[6]) for row in claude_rows)
-    try:
-        hits = log_hits(logs, ("429", "rate limit", "quota", "insufficient_quota"), "opencode", deadline)
-        if hits:
-            rows.append(("OpenCode", "opencode-go/deepseek-v4.1-flash", "last error", "n/a",
-                         local_time(hits[0][0]), switch_state("deepseek", switches), hits[0][1]))
-        else:
-            try:
-                stats = subprocess.run(["opencode", "stats"], capture_output=True, text=True, timeout=20)
-                if stats.returncode != 0:
-                    raise ValueError("opencode stats failed")
-                tokens = parse_opencode_tokens(stats.stdout)
-                rows.append(("OpenCode", "opencode-go/deepseek-v4.1-flash", tokens,
-                             "n/a", "n/a", switch_state("deepseek", switches),
-                             "opencode stats (no quota API)"))
-            except Exception:
-                rows.append(("OpenCode", "n/a", "n/a", "n/a", "n/a", "on", "n/a (source unavailable)"))
-    except Exception:
-        rows.append(("OpenCode", "n/a", "n/a", "n/a", "n/a", "on", "n/a (source unavailable)"))
-    free_model = "opencode/deepseek-v4.1-flash-free"
-    try:
-        free_hits = log_hits(logs, ("freeusagelimiterror",), "opencode", deadline)
-    except Exception:
-        free_hits = []
-    if free_hits:
-        rows.append(("OpenCode free", free_model, "last error", "n/a", local_time(free_hits[0][0]),
-                     switch_state("deepseek-free", switches), free_hits[0][1]))
-    else:
-        rows.append(("OpenCode free", free_model, "free", "n/a", "n/a",
-                     switch_state("deepseek-free", switches), "free, no published cap"))
-    try:
-        rows.extend(perch_rows(perch_usage(deadline, perch_cache), switches))
-    except Exception:
-        rows.append(("Perch", "deepseek-flash-starter", "n/a", "n/a", "n/a",
-                     switch_state("perch-deepseek", switches), "n/a (source unavailable)"))
-    rows.append(("Relay", "relay-sonnet", "n/a", "n/a", "n/a",
-                 switch_state("relay", switches), "n/a (no quota API)"))
-    rows.append(("ChatAnywhere", "gpt-6-luna", "n/a", "n/a", "n/a",
-                 switch_state("chatanywhere", switches), "free key: 100 req/day, 50k pts/week, no usage API"))
-    try:
-        # The future may already be done after a slow stats call; a deadline must
-        # not discard data that is ready.
-        if agy_future.done():
-            agy_rows = agy_future.result()
-        else:
-            agy_rows = agy_future.result(timeout=deadline.remaining())
-        for worker, model, used, window, resets, enabled, source in agy_rows:
-            model_name = "gemini" if worker == "Gemini" else "agy-3p"
-            rows.append((worker, model_name, used, window, resets, switch_state(model_name, switches), source))
-    except Exception:
+        codex_future = executor.submit(codex_rows, root, switches, deadline, codex_cache)
+        claude_future = executor.submit(claude_usage_rows, state_path)
+        opencode_future = executor.submit(_opencode_row, logs, switches, deadline)
+        perch_future = executor.submit(perch_usage, deadline, perch_cache)
+        agy_future = executor.submit(agy_usage, deadline)
+
+        rows = []
         try:
-            hits = log_hits([gemini_log], ("429", "rate limit", "quota", "resource_exhausted"), "agy", deadline)
-            if hits:
-                rows.append(("Gemini", "agy", "last error", "n/a", local_time(hits[0][0]), "on", hits[0][1]))
-            else:
-                rows.append(("Gemini", "agy", "n/a", "n/a", "n/a", "on", "no quota error seen"))
+            rows.extend(_future_result(codex_future, deadline))
         except Exception:
-            rows.append(("Gemini", "n/a", "n/a", "n/a", "n/a", "on", "n/a (source unavailable)"))
-    executor.shutdown(wait=False)
-    return rows, switches
+            rows.append(("Codex", "n/a", "n/a", "n/a", "n/a", "on", "n/a (source unavailable)"))
+        try:
+            claude_rows = _future_result(claude_future, deadline)
+        except Exception:
+            claude_rows = [("Claude", "Claude Code", "n/a (usage unavailable)", "n/a", "n/a",
+                            "on", "n/a (usage unavailable)")]
+        rows.extend(tuple(row[:5]) + (switch_state("Claude Code", switches), row[6]) for row in claude_rows)
+        try:
+            rows.append(_future_result(opencode_future, deadline))
+        except Exception:
+            rows.append(("OpenCode", "n/a", "n/a", "n/a", "n/a", "on", "n/a (source unavailable)"))
+        free_model = "opencode/deepseek-v4.1-flash-free"
+        try:
+            free_hits = log_hits(logs, ("freeusagelimiterror",), "opencode", deadline)
+        except Exception:
+            free_hits = []
+        if free_hits:
+            rows.append(("OpenCode free", free_model, "last error", "n/a", local_time(free_hits[0][0]),
+                         switch_state("deepseek-free", switches), free_hits[0][1]))
+        else:
+            rows.append(("OpenCode free", free_model, "free", "n/a", "n/a",
+                         switch_state("deepseek-free", switches), "free, no published cap"))
+        try:
+            rows.extend(perch_rows(_future_result(perch_future, deadline), switches))
+        except Exception:
+            rows.append(("Perch", "deepseek-flash-starter", "n/a", "n/a", "n/a",
+                         switch_state("perch-deepseek", switches), "n/a (source unavailable)"))
+        rows.append(("Relay", "relay-sonnet", "n/a", "n/a", "n/a",
+                     switch_state("relay", switches), "n/a (no quota API)"))
+        rows.append(("ChatAnywhere", "gpt-6-luna", "n/a", "n/a", "n/a",
+                     switch_state("chatanywhere", switches), "free key: 100 req/day, 50k pts/week, no usage API"))
+        try:
+            agy_rows = _future_result(agy_future, deadline)
+            for worker, model, used, window, resets, enabled, source in agy_rows:
+                model_name = "gemini" if worker == "Gemini" else "agy-3p"
+                rows.append((worker, model_name, used, window, resets, switch_state(model_name, switches), source))
+        except Exception:
+            try:
+                hits = log_hits([gemini_log], ("429", "rate limit", "quota", "resource_exhausted"), "agy", deadline)
+                if hits:
+                    rows.append(("Gemini", "agy", "last error", "n/a", local_time(hits[0][0]), "on", hits[0][1]))
+                else:
+                    rows.append(("Gemini", "agy", "n/a", "n/a", "n/a", "on", "no quota error seen"))
+            except Exception:
+                rows.append(("Gemini", "n/a", "n/a", "n/a", "n/a", "on", "n/a (source unavailable)"))
+        return rows, switches
+    finally:
+        executor.shutdown(wait=False)
 
 
 def _duration_text(value):

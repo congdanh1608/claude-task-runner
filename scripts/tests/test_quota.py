@@ -594,6 +594,63 @@ class QuotaTest(unittest.TestCase):
         self.assertEqual(3, len(perch))
         self.assertIn("Perch", quota.render_table(rows, switches))
 
+    def test_render_runs_slow_sources_in_parallel(self):
+        delay = 0.3
+
+        def slow_claude(*_args, **_kwargs):
+            time.sleep(delay)
+            return [("Claude", "Claude Code", "80%", "weekly", "n/a", "on", "x")]
+
+        def slow_perch(*_args, **_kwargs):
+            time.sleep(delay)
+            return {"month": {"used": 1, "limit": 100, "percent": 1}}
+
+        def slow_agy(*_args, **_kwargs):
+            time.sleep(delay)
+            return [("Gemini", "gemini", "90%", "weekly", "n/a", "on", "x")]
+
+        def slow_opencode(*_args, **_kwargs):
+            time.sleep(delay)
+            return mock.Mock(returncode=0, stdout="1.0b tokens")
+
+        with mock.patch.object(quota, "codex_rows", return_value=[
+                    ("Codex", "luna+sol", "95%", "5h", "n/a", "on", "x")]), \
+                mock.patch.object(quota, "claude_usage_rows", side_effect=slow_claude), \
+                mock.patch.object(quota, "perch_usage", side_effect=slow_perch), \
+                mock.patch.object(quota, "agy_usage", side_effect=slow_agy), \
+                mock.patch.object(quota.subprocess, "run", side_effect=slow_opencode):
+            start = time.monotonic()
+            rows, _ = quota.render(root="/nonexistent", state_path="/nonexistent", logs=[],
+                                   gemini_log="/nonexistent", switches={})
+            elapsed = time.monotonic() - start
+        self.assertLess(elapsed, delay * 2)
+        self.assertEqual(
+            ["Codex", "Claude", "OpenCode", "OpenCode free", "Perch", "Relay", "ChatAnywhere", "Gemini"],
+            [row[0] for row in rows],
+        )
+
+    def test_render_one_source_exception_yields_fallback_and_preserves_others(self):
+        with mock.patch.object(quota, "codex_rows", return_value=[
+                    ("Codex", "luna+sol", "95%", "5h", "n/a", "on", "x")]), \
+                mock.patch.object(quota, "claude_usage_rows", return_value=[
+                    ("Claude", "Claude Code", "80%", "weekly", "n/a", "on", "x")]), \
+                mock.patch.object(quota, "perch_usage", side_effect=RuntimeError("boom")), \
+                mock.patch.object(quota, "agy_usage", return_value=[
+                    ("Gemini", "gemini", "90%", "weekly", "n/a", "on", "x")]), \
+                mock.patch.object(quota.subprocess, "run",
+                                  return_value=mock.Mock(returncode=0, stdout="1.0b tokens")):
+            rows, _ = quota.render(root="/nonexistent", state_path="/nonexistent", logs=[],
+                                   gemini_log="/nonexistent", switches={})
+        self.assertEqual(
+            ["Codex", "Claude", "OpenCode", "OpenCode free", "Perch", "Relay", "ChatAnywhere", "Gemini"],
+            [row[0] for row in rows],
+        )
+        perch = next(row for row in rows if row[0] == "Perch")
+        self.assertEqual(
+            ("Perch", "deepseek-flash-starter", "n/a", "n/a", "n/a", "on", "n/a (source unavailable)"),
+            perch,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
