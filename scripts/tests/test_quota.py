@@ -651,6 +651,34 @@ class QuotaTest(unittest.TestCase):
             perch,
         )
 
+    def test_render_opencode_and_free_scan_overlap(self):
+        delay = 0.3
+
+        def slow_log_hits(*_args, **_kwargs):
+            time.sleep(delay)
+            return []
+
+        def slow_opencode_stats(*_args, **_kwargs):
+            time.sleep(delay)
+            return mock.Mock(returncode=0, stdout="1.0b tokens")
+
+        with mock.patch.object(quota, "codex_rows", return_value=[]), \
+                mock.patch.object(quota, "claude_usage_rows", return_value=[]), \
+                mock.patch.object(quota, "perch_usage", return_value={}), \
+                mock.patch.object(quota, "agy_usage", return_value=[]), \
+                mock.patch.object(quota, "log_hits", side_effect=slow_log_hits) as hits_mock, \
+                mock.patch.object(quota.subprocess, "run", side_effect=slow_opencode_stats):
+            start = time.monotonic()
+            rows, _ = quota.render(root="/nonexistent", state_path="/nonexistent", logs=[],
+                                   gemini_log="/nonexistent", switches={})
+            elapsed = time.monotonic() - start
+        self.assertLess(elapsed, delay * 1.8)
+        self.assertEqual(2, hits_mock.call_count)
+        opencode = next(row for row in rows if row[0] == "OpenCode")
+        self.assertEqual("1B tok", opencode[2])
+        free = next(row for row in rows if row[0] == "OpenCode free")
+        self.assertEqual("free, no published cap", free[-1])
+
 
 if __name__ == "__main__":
     unittest.main()

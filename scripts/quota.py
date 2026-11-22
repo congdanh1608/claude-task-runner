@@ -727,21 +727,14 @@ def _future_result(future, deadline):
     return future.result(timeout=deadline.remaining())
 
 
-def _opencode_row(logs, switches, deadline):
-    try:
-        hits = log_hits(logs, ("429", "rate limit", "quota", "insufficient_quota"), "opencode", deadline)
-        if hits:
-            return ("OpenCode", "opencode-go/deepseek-v4.1-flash", "last error", "n/a",
-                    local_time(hits[0][0]), switch_state("deepseek", switches), hits[0][1])
-        stats = subprocess.run(["opencode", "stats"], capture_output=True, text=True, timeout=20)
-        if stats.returncode != 0:
-            raise ValueError("opencode stats failed")
-        tokens = parse_opencode_tokens(stats.stdout)
-        return ("OpenCode", "opencode-go/deepseek-v4.1-flash", tokens,
-                "n/a", "n/a", switch_state("deepseek", switches),
-                "opencode stats (no quota API)")
-    except Exception:
-        return ("OpenCode", "n/a", "n/a", "n/a", "n/a", "on", "n/a (source unavailable)")
+def _opencode_stats_row(switches):
+    stats = subprocess.run(["opencode", "stats"], capture_output=True, text=True, timeout=20)
+    if stats.returncode != 0:
+        raise ValueError("opencode stats failed")
+    tokens = parse_opencode_tokens(stats.stdout)
+    return ("OpenCode", "opencode-go/deepseek-v4.1-flash", tokens,
+            "n/a", "n/a", switch_state("deepseek", switches),
+            "opencode stats (no quota API)")
 
 
 def render(root=None, state_path=None, logs=None, gemini_log=None, switches=None, deadline=None,
@@ -752,11 +745,17 @@ def render(root=None, state_path=None, logs=None, gemini_log=None, switches=None
     logs = glob.glob(os.path.join(LOG_DIR, "*.log")) if logs is None else logs
     gemini_log = gemini_log or os.path.join(HOME, ".gemini/antigravity-cli/cli.log")
     switches = switches if switches is not None else get_switches()
-    executor = concurrent.futures.ThreadPoolExecutor(max_workers=5)
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=7)
     try:
         codex_future = executor.submit(codex_rows, root, switches, deadline, codex_cache)
         claude_future = executor.submit(claude_usage_rows, state_path)
-        opencode_future = executor.submit(_opencode_row, logs, switches, deadline)
+        opencode_hits_future = executor.submit(
+            log_hits, logs, ("429", "rate limit", "quota", "insufficient_quota"), "opencode", deadline
+        )
+        opencode_stats_future = executor.submit(_opencode_stats_row, switches)
+        free_hits_future = executor.submit(
+            log_hits, logs, ("freeusagelimiterror",), "opencode", deadline
+        )
         perch_future = executor.submit(perch_usage, deadline, perch_cache)
         agy_future = executor.submit(agy_usage, deadline)
 
@@ -772,12 +771,17 @@ def render(root=None, state_path=None, logs=None, gemini_log=None, switches=None
                             "on", "n/a (usage unavailable)")]
         rows.extend(tuple(row[:5]) + (switch_state("Claude Code", switches), row[6]) for row in claude_rows)
         try:
-            rows.append(_future_result(opencode_future, deadline))
+            hits = _future_result(opencode_hits_future, deadline)
+            if hits:
+                rows.append(("OpenCode", "opencode-go/deepseek-v4.1-flash", "last error", "n/a",
+                             local_time(hits[0][0]), switch_state("deepseek", switches), hits[0][1]))
+            else:
+                rows.append(_future_result(opencode_stats_future, deadline))
         except Exception:
             rows.append(("OpenCode", "n/a", "n/a", "n/a", "n/a", "on", "n/a (source unavailable)"))
         free_model = "opencode/deepseek-v4.1-flash-free"
         try:
-            free_hits = log_hits(logs, ("freeusagelimiterror",), "opencode", deadline)
+            free_hits = _future_result(free_hits_future, deadline)
         except Exception:
             free_hits = []
         if free_hits:
