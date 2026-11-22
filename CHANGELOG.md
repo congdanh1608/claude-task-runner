@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.35.5
+- task quota overlaps the OpenCode log scan, opencode stats and free-model scan
+
 ## 2.35.4
 - task quota checks its sources in parallel
 
