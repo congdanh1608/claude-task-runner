@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.35.4
+- task quota checks its sources in parallel
+
 ## 2.35.3
 - Docs: prod SSH allowed on any owner-paid worker; third-party gateway and free workers excluded
 
