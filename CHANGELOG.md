@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.35.6
+- task quota shows only workers with a real quota source; no log scan, no opencode stats (7 s instead of 28 s)
+
 ## 2.35.5
 - task quota overlaps the OpenCode log scan, opencode stats and free-model scan
 
