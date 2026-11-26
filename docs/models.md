@@ -1,6 +1,6 @@
 # How Tasks Are Assigned to Models
 
-`task` routes work through six task rows (`search`, `inventory`, `mechanical`, `code`, `review`, `hard`). Each row defines an ordered list of model aliases in `scripts/task.py`, ordered by default priority: **Gemini -> Codex -> OpenCode** (`chatanywhere` last).
+`task` routes work through nine task rows (`search`, `inventory`, `mechanical`, `code`, `deep`, `review`, `hard`, `critical`, `escalate`). Each row defines an ordered list of model aliases in `scripts/task.py`, ordered by default priority: **Gemini -> Codex -> OpenCode** (`chatanywhere` last).
 
 ## Task Rows
 
@@ -8,10 +8,13 @@
 | --- | --- |
 | `search` | Search, web research, long docs, screenshots, and light read-only chores (gathering facts for a brief, triaging logs, checking dependency versions/changelogs, summarizing specs). |
 | `inventory` | Read-only listings with `file:line` and no reasoning (listing settings, finding usages, comparing two repos, code maps). |
-| `mechanical` | Scoped code with a clear spec (1–3 files), writing tests for existing code, docs, deploy notes, changelogs, pattern edits, and renames. |
-| `code` | Multi-file features or refactors, work that needs running the app, debugging by reproducing/measuring, and deploys/ops/standalone builds (with `--model luna`). |
-| `review` | Code diff reviews and re-reviews. |
-| `hard` | Plan or spec reviews, final branch reviews, risky changes (prod, migration, payments, auth), and hard bugs. |
+| `mechanical` | Docs, deploy notes, changelogs, scripts with clear input/output, pattern edits, renames, writing tests for existing code, deploys and ops (Hydrogen low, Codex low). |
+| `code` | Scoped code with a clear spec (1–3 files), multi-file features or refactors, work that needs running the app (Hydrogen medium, Codex medium). |
+| `deep` | Hard code: many files, debugging by reproducing/measuring, root cause, no test to lean on (Hydrogen high, Codex high). |
+| `review` | Code diff reviews, re-reviews and final branch reviews (Carbon low, Codex medium). |
+| `hard` | Spec and plan review by a model other than the writer (Neon medium, Codex medium). |
+| `critical` | Writing specs and plans, and risky changes (prod, migration, payments, auth) (Carbon high, Codex high). |
+| `escalate` | Hard bugs (async, concurrency, sync) and any task Carbon FAILed. Neon high is costly, so it is never a default (Codex high). |
 
 ## Row-to-Model Table
 
@@ -21,10 +24,13 @@ Each row lists model aliases in priority order (first = preferred). Default `--t
 | --- | --- | --- | --- |
 | `search` | 1. `flash` (`gemini`: `gemini-3.8-flash-medium`)<br>2. `luna` (`codex`: `gpt-6-luna`)<br>3. `deepseek` (`opencode`: `opencode-go/deepseek-v4.1-flash`)<br>4. `chatanywhere` (`codex`: `gpt-6-luna`) | `180`s (`flash`, `luna`, `deepseek`)<br>`300`s (`chatanywhere`) | `None` (Codex uses its config default; ignored by Gemini/OpenCode) |
 | `inventory` | 1. `flash` (`gemini`: `gemini-3.8-flash-high`)<br>2. `luna` (`codex`: `gpt-6-luna`)<br>3. `deepseek` (`opencode`: `opencode-go/deepseek-v4.1-flash`)<br>4. `chatanywhere` (`codex`: `gpt-6-luna`) | `180`s (`flash`, `luna`, `deepseek`)<br>`300`s (`chatanywhere`) | `None` |
-| `mechanical` | 1. `hydrogen` (`gemini`: `gemini-4-hydrogen-medium`)<br>2. `luna` (`codex`: `gpt-6-luna`)<br>3. `deepseek` (`opencode`: `opencode-go/deepseek-v4.1-flash`)<br>4. `chatanywhere` (`codex`: `gpt-6-luna`) | `300`s (`hydrogen`, `chatanywhere`)<br>`180`s (`luna`, `deepseek`) | `None` |
-| `code` | 1. `hydrogen` (`gemini`: `gemini-4-hydrogen-medium`)<br>2. `luna` (`codex`: `gpt-6-luna`)<br>3. `deepseek` (`opencode`: `opencode-go/deepseek-v4.1-flash`)<br>4. `sol` (`codex`: `gpt-6.1-sol`)<br>5. `chatanywhere` (`codex`: `gpt-6-luna`) | `300`s (`hydrogen`, `sol`, `chatanywhere`)<br>`180`s (`luna`, `deepseek`) | `None` |
-| `review` | 1. `carbon` (`gemini`: `gemini-4-carbon-low`)<br>2. `sol` (`codex`: `gpt-6.1-sol`)<br>3. `luna` (`codex`: `gpt-6-luna`)<br>4. `deepseek` (`opencode`: `opencode-go/deepseek-v4.1-flash`)<br>5. `argon` (`gemini`: `gemini-4-argon-low`) | `300`s (`carbon`, `sol`, `argon`)<br>`180`s (`luna`, `deepseek`) | `None` |
-| `hard` | 1. `carbon` (`gemini`: `gemini-4-carbon-low`)<br>2. `sol` (`codex`: `gpt-6.1-sol`)<br>3. `luna` (`codex`: `gpt-6-luna`)<br>4. `deepseek` (`opencode`: `opencode-go/deepseek-v4.1-flash`) | `300`s (`carbon`, `sol`)<br>`180`s (`luna`, `deepseek`) | `None` |
+| `mechanical` | 1. `hydrogen-low` (`gemini`: `gemini-4-hydrogen-low`)<br>2. `luna` (`codex`: `gpt-6-luna`)<br>3. `deepseek` (`opencode`: `opencode-go/deepseek-v4.1-flash`)<br>4. `chatanywhere` (`codex`: `gpt-6-luna`) | `300`s (`hydrogen-low`, `chatanywhere`)<br>`180`s (`luna`, `deepseek`) | Codex `low` (Gemini: in the model name; OpenCode: none) |
+| `code` | 1. `hydrogen` (`gemini`: `gemini-4-hydrogen-medium`)<br>2. `luna` (`codex`: `gpt-6-luna`)<br>3. `deepseek` (`opencode`: `opencode-go/deepseek-v4.1-flash`)<br>4. `chatanywhere` (`codex`: `gpt-6-luna`) | `300`s (`hydrogen`, `chatanywhere`)<br>`180`s (`luna`, `deepseek`) | Codex `medium` (Gemini: in the model name; OpenCode: none) |
+| `review` | 1. `carbon` (`gemini`: `gemini-4-carbon-low`)<br>2. `sol` (`codex`: `gpt-6.1-sol`)<br>3. `luna` (`codex`: `gpt-6-luna`)<br>4. `deepseek` (`opencode`: `opencode-go/deepseek-v4.1-flash`)<br>5. `argon` (`gemini`: `gemini-4-argon-low`) | `300`s (`carbon`, `sol`, `argon`)<br>`180`s (`luna`, `deepseek`) | Codex `medium` (Gemini: in the model name; OpenCode: none) |
+| `deep` | 1. `hydrogen-high` (`gemini`: `gemini-4-hydrogen-high`)<br>2. `luna` (`codex`: `gpt-6-luna`)<br>3. `deepseek` (`opencode`: `opencode-go/deepseek-v4.1-flash`)<br>4. `chatanywhere` (`codex`: `gpt-6-luna`) | `300`s (`hydrogen-high`, `chatanywhere`)<br>`180`s (`luna`, `deepseek`) | Codex `high` (Gemini: in the model name; OpenCode: none) |
+| `critical` | 1. `carbon-high` (`gemini`: `gemini-4-carbon-high`)<br>2. `sol` (`codex`: `gpt-6.1-sol`)<br>3. `deepseek` (`opencode`: `opencode-go/deepseek-v4.1-flash`) | `300`s (`carbon-high`, `sol`)<br>`180`s (`deepseek`) | Codex `high` (Gemini: in the model name; OpenCode: none) |
+| `escalate` | 1. `neon` (`gemini`: `gemini-4-neon-high`)<br>2. `sol` (`codex`: `gpt-6.1-sol`)<br>3. `deepseek` (`opencode`: `opencode-go/deepseek-v4.1-flash`) | `300`s (`neon`, `sol`)<br>`180`s (`deepseek`) | Codex `high` (Gemini: in the model name; OpenCode: none) |
+| `hard` | 1. `neon-medium` (`gemini`: `gemini-4-neon-medium`)<br>2. `sol` (`codex`: `gpt-6.1-sol`)<br>3. `luna` (`codex`: `gpt-6-luna`)<br>4. `deepseek` (`opencode`: `opencode-go/deepseek-v4.1-flash`) | `300`s (`neon-medium`, `sol`)<br>`180`s (`luna`, `deepseek`) | Codex `medium` (Gemini: in the model name; OpenCode: none) |
 
 ## How `task start` and `task resolve` Pick a Model
 
@@ -42,10 +48,10 @@ Each row lists model aliases in priority order (first = preferred). Default `--t
 
 When one or more CLIs are disabled via `task off <cli>` (see [docs/workers.md](workers.md)):
 
-| Turned Off | `code`, `review`, `hard`, `mechanical` Rows Run On | `search`, `inventory` Rows Run On |
+| Turned Off | `code`, `deep`, `review`, `hard`, `critical`, `escalate`, `mechanical` Rows Run On | `search`, `inventory` Rows Run On |
 | --- | --- | --- |
-| Gemini | Codex (`luna`, `sol`), then OpenCode (`code`: `luna`, `deepseek`, `sol`) | `luna`, then `deepseek` |
-| Codex | Gemini (`hydrogen`, `carbon`), then OpenCode (`argon` last in `review`) | `flash` |
+| Gemini | Codex (`luna`, `sol`), then OpenCode (`code`: `luna`, `deepseek`) | `luna`, then `deepseek` |
+| Codex | Gemini (`hydrogen`, `hydrogen-low`, `hydrogen-high`, `carbon`, `carbon-high`, `neon`, `neon-medium`), then OpenCode (`argon` last in `review`) | `flash` |
 | OpenCode | Gemini, then Codex | `flash` |
 | Gemini + Codex | OpenCode (`deepseek`) | `deepseek` |
 | All three | Claude subagents (if configured) | Ask user |

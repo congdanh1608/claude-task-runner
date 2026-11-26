@@ -621,7 +621,7 @@ def switch_state(model, switches):
             "relay-sonnet": ("relay-sonnet",), "relay-haiku": ("relay-haiku",),
             "relay-opus": ("relay-opus",),
             "relay": ("relay",), "chatanywhere": ("chatanywhere",),
-            "gemini": ("flash", "hydrogen", "argon", "carbon"), "agy-3p": ("sonnet",), "Claude Code": ("claude",)}.get(model, ())
+            "gemini": ("flash", "hydrogen", "argon", "carbon", "carbon-high", "neon", "neon-medium", "hydrogen-low", "hydrogen-high"), "agy-3p": ("sonnet",), "Claude Code": ("claude",)}.get(model, ())
     return "on" if any(switches.get(key, True) for key in keys) else "off"
 
 

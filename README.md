@@ -128,7 +128,7 @@ Integrations with external tools or plugins (such as custom statuslines, progres
 - Commit only with a GitHub noreply identity (`<id>+<user>@users.noreply.github.com`) and write in English only.
 - Enable the pre-commit hook in each clone: `git config core.hooksPath .githooks`.
 - Run `python3 scripts/check-sensitive.py --all --history` with `PLUGIN_DENYLIST` (file with one forbidden literal per line) and `PLUGIN_NAME_DIRS` (directories (globs allowed, for example `/work/clients/*`) whose immediate subfolder names must never appear anywhere in the repo or its history; `PLUGIN_NAME_ALLOW` is an optional comma-separated list of names to ignore (such as this repo's own name)) set.
-- Releases go only through `scripts/release.sh`, which refuses to run without those two variables and scans the whole history before it commits.
+- Releases go only through `scripts/release.sh`, which refuses to run without those two variables and scans the whole history before it commits. After the tag is pushed it also creates the GitHub release for that tag, using the version's CHANGELOG section as the notes (skipped with a warning when `gh` is missing or not logged in).
 
 ## Documentation
 

@@ -448,10 +448,10 @@ class ResolveTests(RunnerCase):
     def test_resolve_rows_uses_default_cli_and_short_model(self):
         for row, expected in (("search", "gemini - flash"),
                               ("inventory", "gemini - flash"),
-                              ("mechanical", "gemini - hydrogen"),
+                              ("mechanical", "gemini - hydrogen-low"),
                               ("code", "gemini - hydrogen"),
                               ("review", "gemini - carbon"),
-                              ("hard", "gemini - carbon")):
+                              ("hard", "gemini - neon-medium")):
             with self.subTest(row=row):
                 result = self.task("resolve", row)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -618,12 +618,12 @@ class WorkerSwitchTests(RunnerCase):
         cases = [("search", "flash", "luna", "gpt-6-luna"),
                  ("code", "hydrogen", "luna", "gpt-6-luna"),
                  ("review", "carbon", "sol", "gpt-6.1-sol"),
-                 ("hard", "carbon", "sol", "gpt-6.1-sol"),
-                 ("mechanical", "hydrogen", "luna", "gpt-6-luna")]
+                 ("hard", "neon-medium", "sol", "gpt-6.1-sol"),
+                 ("mechanical", "hydrogen-low", "luna", "gpt-6-luna")]
         for index, (row, disabled, chosen, model) in enumerate(cases):
             with self.subTest(row=row):
-                for name in ("sol", "luna", "deepseek-free", "deepseek", "flash", "hydrogen", "argon", "carbon",
-                             "sonnet", "codex", "opencode", "gemini"):
+                for name in ("sol", "luna", "deepseek-free", "deepseek", "flash", "hydrogen", "hydrogen-low", "argon", "carbon",
+                             "neon-medium", "sonnet", "codex", "opencode", "gemini"):
                     self.task("on", name)
                 self.switches(disabled)
                 res = self.task("start", "row%d" % index, self.brief(), "--row", row,
@@ -634,10 +634,10 @@ class WorkerSwitchTests(RunnerCase):
                 self.assertEqual(self.reg("row%d" % index)["fallback"], {"from": disabled, "to": chosen})
 
     def test_mechanical_fallback_skips_two_off_entries(self):
-        self.switches("hydrogen", "luna")
+        self.switches("hydrogen-low", "luna")
         res = self.task("start", "skip", self.brief(), "--row", "mechanical", "--cwd", str(self.work))
         self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
-        self.assertIn("FALLBACK: hydrogen off -> deepseek", res.stdout)
+        self.assertIn("FALLBACK: hydrogen-low off -> deepseek", res.stdout)
         self.assertEqual(self.reg("skip")["alias"], "deepseek")
 
     def test_search_row_uses_flash_low(self):
@@ -675,7 +675,7 @@ class WorkerSwitchTests(RunnerCase):
         self.assertEqual(self.reg("search-fallback")["model"], "gemini-3.8-flash-medium")
 
     def test_mechanical_row_never_falls_back_to_flash(self):
-        self.switches("hydrogen", "luna", "deepseek")
+        self.switches("hydrogen-low", "luna", "deepseek")
         self.assertEqual(self.task("resolve", "mechanical").stdout, "codex - chatanywhere\n")
         self.switches("chatanywhere")
         result = self.task("resolve", "mechanical")
@@ -775,8 +775,9 @@ class StartTests(RunnerCase):
         self.assertIn("codex - luna - t1 | DONE", res.stdout)
         self.assertIn("ANSWER: all good 1", res.stdout)
         argv = self.argv()
-        self.assertEqual(argv[:11], ["exec", "--json", "--skip-git-repo-check", "-m", "gpt-6-luna",
-                                     "-c", "model_auto_compact_token_limit=250000", "-s",
+        self.assertEqual(argv[:13], ["exec", "--json", "--skip-git-repo-check", "-m", "gpt-6-luna",
+                                     "-c", "model_auto_compact_token_limit=250000",
+                                     "-c", 'model_reasoning_effort="medium"', "-s",
                                      "danger-full-access", "-C", str(self.work)])
         self.assertEqual((self.fake_dir / "role.1").read_text(), "worker")
 
@@ -1143,7 +1144,7 @@ class StartTests(RunnerCase):
         branches = subprocess.run(["git", "branch", "--list", "task/w1"], cwd=repo,
                                   capture_output=True, text=True).stdout
         self.assertIn("task/w1", branches)
-        self.assertEqual(Path(self.argv()[10]).resolve(), wt.resolve())
+        self.assertEqual(Path(self.argv()[12]).resolve(), wt.resolve())
         self.assertEqual(Path((self.fake_dir / "cwd.1").read_text().strip()).resolve(), wt.resolve())
 
     def test_write_outside_git_repo_fails(self):
@@ -1161,6 +1162,7 @@ class ReplyTests(RunnerCase):
         expected_message = "second \"msg\"\n$HOME\n\n" + load_module().CONTRACT_FOOTER
         self.assertEqual(argv, ["exec", "resume", "--json", "--skip-git-repo-check", "-m", "gpt-6-luna",
                                 "-c", "model_auto_compact_token_limit=250000",
+                                "-c", 'model_reasoning_effort="medium"',
                                 "-c", 'sandbox_mode="danger-full-access"', "SESSION-codex-1",
                                 expected_message])
         reg = self.reg("r1")
@@ -1177,7 +1179,7 @@ class ReplyTests(RunnerCase):
         self.assertEqual(self.task("reply", "e1", "more").returncode, 0)
         self.assertIn('model_reasoning_effort="high"', self.argv(2))
         self.assertEqual(self.start("codex", "e2").returncode, 0)
-        self.assertNotIn("model_reasoning_effort", " ".join(self.argv(3)))
+        self.assertIn('model_reasoning_effort="medium"', " ".join(self.argv(3)))
         self.assertEqual(self.start("codex", "e3", "--effort", "xhigh").returncode, 0)
         self.assertIn('model_reasoning_effort="xhigh"', self.argv(4))
 
@@ -1350,7 +1352,7 @@ class DeepseekTwinTests(RunnerCase):
         self.assertEqual(mod.model_alias("opencode", self.FREE), "deepseek-free")
         for row, names in mod.ROWS.items():
             self.assertNotIn("deepseek-free", names, row)
-        self.assertEqual(mod.ROWS["mechanical"], ["hydrogen", "luna", "deepseek", "chatanywhere"])
+        self.assertEqual(mod.ROWS["mechanical"], ["hydrogen-low", "luna", "deepseek", "chatanywhere"])
 
     def test_off_on_and_workers_list(self):
         self.assertIn("deepseek-free: on", self.task("workers").stdout)
@@ -1740,7 +1742,7 @@ class PerchWorkerTests(RunnerCase):
         mod = load_module()
         for row, names in mod.ROWS.items():
             self.assertNotIn("perch-deepseek", names, row)
-        self.assertEqual(mod.ROWS["mechanical"], ["hydrogen", "luna", "deepseek", "chatanywhere"])
+        self.assertEqual(mod.ROWS["mechanical"], ["hydrogen-low", "luna", "deepseek", "chatanywhere"])
         self.assertNotIn("perch-deepseek", mod.TWINS)
         self.assertNotIn("perch-deepseek", mod.TWINS.values())
         self.assertIn("perch-deepseek", mod.OWNER_ONLY)
@@ -1931,11 +1933,11 @@ class PerchWorkerTests(RunnerCase):
                  "five_hour": {"percent": 4, "frees_up": None},
                  "weekly": {"percent": 4, "frees_up": None}}
         self.write_perch_cache(spent)
-        self.switches("hydrogen", "luna")
+        self.switches("hydrogen-low", "luna")
         self.assertEqual(self.task("resolve", "mechanical").stdout, "opencode - deepseek\n")
         res = self.task("start", "row", self.brief(), "--row", "mechanical", "--cwd", str(self.work))
         self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
-        self.assertIn("FALLBACK: hydrogen off -> deepseek", res.stdout)
+        self.assertIn("FALLBACK: hydrogen-low off -> deepseek", res.stdout)
         self.assertEqual(self.reg("row")["alias"], "deepseek")
         self.assertEqual(self.argv()[4], self.PAID)
         self.switches("perch-deepseek")
@@ -1955,7 +1957,7 @@ class PerchWorkerTests(RunnerCase):
         self.assertEqual(self.argv_count(), 1)
 
     def test_no_row_can_pick_perch(self):
-        self.switches("hydrogen", "deepseek", "luna", "chatanywhere")
+        self.switches("hydrogen-low", "deepseek", "luna", "chatanywhere")
         result = self.task("resolve", "mechanical")
         self.assertEqual(result.returncode, 2)
         output = (result.stdout + result.stderr).strip()
@@ -2051,7 +2053,7 @@ class PerchWorkerTests(RunnerCase):
         self.assertEqual(self.reg("p-stall")["runs"][0]["stall"], 900)
 
     def test_deepseek_free_off_falls_to_paid_not_perch(self):
-        self.switches("deepseek-free", "hydrogen", "luna")
+        self.switches("deepseek-free", "hydrogen-low", "luna")
         res = self.task("start", "opencode", "free-off", self.brief(), "--row", "mechanical",
                         "--model", "opencode/deepseek-v4.1-flash-free", "--cwd", str(self.work))
         self.assertEqual(res.returncode, 0, res.stdout + res.stderr)

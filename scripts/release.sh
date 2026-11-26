@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Release task-runner: test, validate, sensitive-scan (tree+history), bump, changelog, commit, tag, push.
+# Release task-runner: test, validate, sensitive-scan (tree+history), bump, changelog, commit, tag, push, GitHub release notes.
 # Usage: scripts/release.sh patch|minor|major "<changelog line>" [--dry-run] [--allow-no-denylist]
 set -euo pipefail
 
@@ -136,4 +136,19 @@ git add .claude-plugin/plugin.json CHANGELOG.md
 git commit -m "Release v${NEWVER}"
 git tag "v${NEWVER}"
 git push origin main --tags
+# Step 6: GitHub release notes from the changelog section (best effort; the tag is already pushed)
+if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+  NOTES=$(python3 - "$NEWVER" <<'PY'
+import re, sys
+ver = sys.argv[1]
+t = open("CHANGELOG.md", encoding="utf-8").read()
+m = re.search(r"^## " + re.escape(ver) + r"\n(.*?)(?=^## |\Z)", t, re.S | re.M)
+print(m.group(1).strip() if m else "See CHANGELOG.md")
+PY
+)
+  gh release create "v${NEWVER}" --verify-tag --title "v${NEWVER}" --notes "$NOTES" \
+    || echo "release: WARNING: GitHub release not created; run: gh release create v${NEWVER} --notes '<changelog>'" >&2
+else
+  echo "release: WARNING: gh missing or not logged in; GitHub release for v${NEWVER} not created" >&2
+fi
 echo "released: v${NEWVER}"

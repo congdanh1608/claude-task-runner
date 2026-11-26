@@ -36,7 +36,7 @@ task test <worker> [<worker> ...] [--resume] [--verbose]
 ```
 
 - You must explicitly specify worker names (e.g. `task test flash`, `task test luna sol`). It never runs all workers automatically.
-- Valid worker names: `luna`, `sol`, `chatanywhere`, `flash`, `hydrogen`, `argon`, `carbon`, `sonnet`, `codex`, `opencode`, `gemini`, `perch`, `perch-deepseek`, `deepseek-free`, `relay-sonnet`, `relay-haiku`, `relay-opus`, `relay`.
+- Valid worker names: `luna`, `sol`, `chatanywhere`, `flash`, `hydrogen`, `argon`, `carbon`, `carbon-high`, `sonnet`, `codex`, `opencode`, `gemini`, `perch`, `perch-deepseek`, `deepseek-free`, `relay-sonnet`, `relay-haiku`, `relay-opus`, `relay`.
 - CLI names map to their default model: `codex` -> `luna`, `opencode` -> `deepseek`, `gemini` -> `flash`, `perch` -> `perch-deepseek`, `relay` -> `relay-sonnet`.
 - Naming a worker that is currently turned off still runs the test and reports `(switch: off)`. This allows you to verify a worker before enabling it.
 - Each test runs in an isolated temporary directory and registry without touching real project tasks.
@@ -47,8 +47,11 @@ task test <worker> [<worker> ...] [--resume] [--verbose]
 
 - **`gemini`** (CLI: `agy`):
   - `flash` (`gemini-3.8-flash-high` for `inventory` / `gemini-3.8-flash-medium` for `search`): Documentation, search, repo inventory, read-only chores.
-  - `hydrogen` (`gemini-4-hydrogen-medium`): Code changes, mechanical edits, small features, unit tests.
-  - `carbon` (`gemini-4-carbon-low`): Code diff reviews, spec reviews, plan reviews.
+  - `hydrogen` (`gemini-4-hydrogen-medium`): Code changes, small features; `hydrogen-low` for docs, ops, renames; `hydrogen-high` for hard code (row `deep`).
+  - `carbon` (`gemini-4-carbon-low`): Code diff reviews and final branch reviews.
+  - `carbon-high` (`gemini-4-carbon-high`): Writing specs and plans, risky changes (row `critical`).
+  - `neon-medium` (`gemini-4-neon-medium`): Spec and plan review (row `hard`).
+  - `neon` (`gemini-4-neon-high`): Hard bugs and Carbon FAIL escalation (row `escalate`); costly.
   - `argon` (`gemini-4-argon-low`): Review fallback.
   - `sonnet` (`claude-sonnet-5-5-medium`): Pinned-only model on Gemini.
 - **`codex`** (CLI: `codex`):
@@ -66,8 +69,8 @@ When one or more CLIs are turned off:
 
 | Turned Off | Code, Review, Hard, Mechanical Rows Run On | Search, Inventory Rows Run On |
 |---|---|---|
-| Gemini | Codex (Luna, Sol), then OpenCode (code: Luna, DeepSeek, Sol) | Luna, then DeepSeek |
-| Codex | Gemini (Hydrogen, Carbon), then OpenCode (Argon last in review) | Flash |
+| Gemini | Codex (Luna, Sol), then OpenCode (code: Luna, DeepSeek) | Luna, then DeepSeek |
+| Codex | Gemini (Hydrogen low/medium/high, Carbon low/high, Neon medium/high), then OpenCode (Argon last in review) | Flash |
 | OpenCode | Gemini, then Codex | Flash |
 | Gemini + Codex | OpenCode (DeepSeek) | DeepSeek |
 | All three | Claude subagents (if configured) | Ask user |

@@ -46,8 +46,13 @@ MODELS = {
     "relay-opus": ("relay", "relay-opus"),
     "flash": ("gemini", "gemini-3.8-flash-high"),
     "hydrogen": ("gemini", "gemini-4-hydrogen-medium"),
+    "hydrogen-low": ("gemini", "gemini-4-hydrogen-low"),
+    "hydrogen-high": ("gemini", "gemini-4-hydrogen-high"),
     "argon": ("gemini", "gemini-4-argon-low"),
     "carbon": ("gemini", "gemini-4-carbon-low"),
+    "carbon-high": ("gemini", "gemini-4-carbon-high"),
+    "neon": ("gemini", "gemini-4-neon-high"),
+    "neon-medium": ("gemini", "gemini-4-neon-medium"),
     "sonnet": ("gemini", "claude-sonnet-5-5-medium"),
 }
 ROWS = {
@@ -58,11 +63,21 @@ ROWS = {
     # deepseek-free retries once on paid deepseek.
     "search": ["flash", "luna", "deepseek", "chatanywhere"],
     "inventory": ["flash", "luna", "deepseek", "chatanywhere"],
-    "mechanical": ["hydrogen", "luna", "deepseek", "chatanywhere"],
-    "code": ["hydrogen", "luna", "deepseek", "sol", "chatanywhere"],
+    "mechanical": ["hydrogen-low", "luna", "deepseek", "chatanywhere"],
+    "code": ["hydrogen", "luna", "deepseek", "chatanywhere"],
+    # Hard code (many files, debug without a test): Hydrogen high.
+    "deep": ["hydrogen-high", "luna", "deepseek", "chatanywhere"],
     "review": ["carbon", "sol", "luna", "deepseek", "argon"],
-    "hard": ["carbon", "sol", "luna", "deepseek"],
+    # Spec/plan review: Neon medium, a different model from Carbon high that wrote the spec/plan.
+    "hard": ["neon-medium", "sol", "luna", "deepseek"],
+    # Risky changes and hard bugs: Carbon high, Sol high (pass --effort high), DeepSeek.
+    "critical": ["carbon-high", "sol", "deepseek"],
+    # Hard bugs and any Carbon FAIL: Neon high (costly, so never a default), then Sol, DeepSeek.
+    "escalate": ["neon", "sol", "deepseek"],
 }
+# Codex reasoning effort per row when --effort is not given (Gemini effort lives in the model name).
+ROW_EFFORT = {"search": "low", "inventory": "low", "mechanical": "low", "code": "medium", "deep": "high",
+              "review": "medium", "hard": "medium", "critical": "high", "escalate": "high"}
 # chatanywhere: Luna on the ChatAnywhere free key through the Codex CLI (provider via -c), tail of rows.
 CHATANYWHERE = "chatanywhere"
 CHATANYWHERE_URL = "https://api.chatanywhere.org/v1"
@@ -71,7 +86,7 @@ CHATANYWHERE_QUOTA_FILE = "task-chatanywhere-quota.json"
 TWINS = {"deepseek-free": "deepseek"}
 OWNER_ONLY = ("deepseek-free", "sonnet", "perch-deepseek", "relay-sonnet", "relay-haiku", "relay-opus")
 ROW_OF_ALIAS = {"flash": "search", "luna": "code", "sol": "hard", "deepseek": "mechanical",
-                "hydrogen": "mechanical", "argon": "review", "carbon": "hard",
+                "hydrogen": "code", "hydrogen-low": "mechanical", "hydrogen-high": "deep", "argon": "review", "carbon": "review", "neon-medium": "hard", "carbon-high": "critical", "neon": "escalate",
                 "chatanywhere": "code",
                 "deepseek-free": "mechanical", "perch-deepseek": "mechanical", "sonnet": "code",
                 "relay-sonnet": "mechanical", "relay-haiku": "mechanical", "relay-opus": "mechanical"}
@@ -1546,7 +1561,7 @@ def make_worktree(cwd, task_id):
 
 def default_stall(alias):
     # Gemini 4 models think in long silent steps (Argon, Carbon about an hour per bench run): Sol-like stall.
-    slow = ("sol", "chatanywhere", "hydrogen", "argon", "carbon", "relay-sonnet", "relay-haiku", "relay-opus")
+    slow = ("sol", "chatanywhere", "hydrogen", "hydrogen-low", "hydrogen-high", "argon", "carbon", "carbon-high", "neon", "neon-medium", "relay-sonnet", "relay-haiku", "relay-opus")
     return 900 if alias == "perch-deepseek" else 300 if alias in slow else 180
 
 
@@ -1650,6 +1665,8 @@ def cmd_start(args):
         "timeout": args.timeout, "watch_paths": watch_paths, "cmd_stall": args.cmd_stall,
         "started": now(), "updated": now(),
     }
+    if reg["effort"] is None and worker == "codex":
+        reg["effort"] = ROW_EFFORT.get(row)
     stall = args.stall if args.stall is not None else default_stall(chosen)
     execute(reg, prompt, True, args.timeout, stall, args.cmd_stall)
     if twin_hop(reg, args.pinned, prompt, args):
@@ -1831,7 +1848,7 @@ def cmd_test(args):
 def default_timeout(alias):
     if alias == "perch-deepseek":
         return 900
-    if alias in ("sol", "hydrogen", "argon", "carbon", "relay-sonnet", "relay-haiku", "relay-opus"):
+    if alias in ("sol", "hydrogen", "hydrogen-low", "hydrogen-high", "argon", "carbon", "carbon-high", "neon", "neon-medium", "relay-sonnet", "relay-haiku", "relay-opus"):
         return 300
     return 180
 
@@ -1926,7 +1943,7 @@ def build_parser():
     start.add_argument("positionals", nargs="+")
     start.add_argument("--model")
     start.add_argument("--effort", choices=("low", "medium", "high", "xhigh"),
-                       help="Codex reasoning effort for this task; default is the Codex config")
+                       help="Codex reasoning effort for this task; default is the row's (ROW_EFFORT)")
     start.add_argument("--row", choices=sorted(ROWS))
     start.add_argument("--pinned", action="store_true")
     start.add_argument("--write", action="store_true", help="work in a new worktree on branch task/<id>")

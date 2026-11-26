@@ -84,14 +84,14 @@ You can invoke `start` in two forms:
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `--row` | Derived from `--model` or `<worker>` | Task row (`code`, `hard`, `inventory`, `mechanical`, `review`, `search`). Required when neither `<worker>` nor `--model` is given. |
-| `--model` | Resolved from `--row` or `<worker>` | Model alias (e.g. `luna`, `sol`, `flash`, `hydrogen`, `argon`, `carbon`, `deepseek`, `deepseek-free`, `chatanywhere`, `perch-deepseek`, `sonnet`, `relay-sonnet`, `relay-haiku`, `relay-opus`) or full model ID. |
-| `--effort` | Codex config default (`None`) | Codex reasoning effort: `low`, `medium`, `high`, or `xhigh`. |
+| `--row` | Derived from `--model` or `<worker>` | Task row (`code`, `deep`, `critical`, `escalate`, `hard`, `inventory`, `mechanical`, `review`, `search`). Required when neither `<worker>` nor `--model` is given. |
+| `--model` | Resolved from `--row` or `<worker>` | Model alias (e.g. `luna`, `sol`, `flash`, `hydrogen`, `argon`, `carbon`, `hydrogen-low`, `hydrogen-high`, `carbon-high`, `neon`, `neon-medium`, `deepseek`, `deepseek-free`, `chatanywhere`, `perch-deepseek`, `sonnet`, `relay-sonnet`, `relay-haiku`, `relay-opus`) or full model ID. |
+| `--effort` | Row default for Codex (see docs/models.md); none for Gemini and OpenCode | Codex reasoning effort: `low`, `medium`, `high`, or `xhigh`. Gemini effort is part of the model alias. |
 | `--pinned` | `false` | Disable fallback; fail with exit code `2` if the requested worker/model is off. Requires both `<worker>` and `--model`. Required for `perch-deepseek` and `relay-*`. |
 | `--write` | `false` | Create a new git worktree at `<repo>/.worktrees/<id>` on branch `task/<id>`. Requires `--cwd` (or current directory) to be inside a git repository. |
 | `--cwd` | Current directory | Working directory for the worker. |
 | `--timeout` | `1800` | Maximum run duration in seconds (positive integer). |
-| `--stall` | Per-alias (`180`, `300`, or `900`) | Seconds without output/watch-file activity before killing the worker (`900` for `perch-deepseek`; `300` for `sol`, `chatanywhere`, `hydrogen`, `argon`, `carbon`, `relay-*`; `180` for others). |
+| `--stall` | Per-alias (`180`, `300`, or `900`) | Seconds without output/watch-file activity before killing the worker (`900` for `perch-deepseek`; `300` for `sol`, `chatanywhere`, `hydrogen`, `argon`, `carbon`, `carbon-high`, `relay-*`; `180` for others). |
 | `--cmd-stall` | `1800` | Watchdog threshold in seconds for a stalled command/subprocess (positive integer). |
 | `--watch` | `[]` | File path to monitor for activity to reset the stall timer. May be passed multiple times; relative paths resolve against the work directory. |
 
@@ -284,7 +284,7 @@ Run a quick smoke test against one or more named workers in an isolated temporar
 task test <worker> [<worker> ...] [--resume] [--verbose]
 ```
 
-Valid `<worker>` names: `luna`, `sol`, `chatanywhere`, `flash`, `hydrogen`, `argon`, `carbon`, `sonnet`, `codex`, `opencode`, `gemini`, `perch`, `perch-deepseek`, `deepseek-free`, `relay-sonnet`, `relay-haiku`, `relay-opus`, `relay`.
+Valid `<worker>` names: `luna`, `sol`, `chatanywhere`, `flash`, `hydrogen`, `argon`, `carbon`, `carbon-high`, `sonnet`, `codex`, `opencode`, `gemini`, `perch`, `perch-deepseek`, `deepseek-free`, `relay-sonnet`, `relay-haiku`, `relay-opus`, `relay`.
 
 **Flags**
 
