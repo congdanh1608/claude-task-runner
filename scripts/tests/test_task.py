@@ -475,8 +475,16 @@ class ResolveTests(RunnerCase):
                 model = "gemini-3.8-flash-medium" if row == "search" else "gemini-3.8-flash-high"
             return alias, worker, model
 
-        for bits in range(1 << len(names)):
-            state = {name: bool(bits & (1 << index)) for index, name in enumerate(names)}
+        # Exhaustive 2**len(names) states doubled with every alias; cover all-on/off, every single and
+        # pair off, and a seeded random sample instead.
+        import itertools, random
+        rng = random.Random(5)
+        states = [dict.fromkeys(names, True), dict.fromkeys(names, False)]
+        for count in (1, 2):
+            for off in itertools.combinations(names, count):
+                states.append({name: name not in off for name in names})
+        states += [{name: rng.random() < 0.5 for name in names} for _ in range(3000)]
+        for state in states:
             for row in mod.ROWS:
                 for preferred in [None] + e5_aliases:
                     try:
