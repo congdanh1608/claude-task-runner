@@ -1,6 +1,6 @@
 {
   "name": "task-runner",
-  "version": "2.35.6",
+  "version": "2.36.0",
   "description": "Resumable worker tasks (Codex, OpenCode, Gemini)",
   "author": {
     "name": "congdanh1608"

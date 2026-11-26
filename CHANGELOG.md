@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.36.0
+- Per-row effort (Codex by row, Gemini in model name) and new aliases: hydrogen-low/high, carbon-high, neon, neon-medium; rows deep, critical, escalate; Carbon high writes specs and plans, Neon medium reviews them, Neon high takes Carbon FAILs; Sol out of code row; release.sh creates the GitHub release from the changelog
+
 ## 2.35.6
 - task quota shows only workers with a real quota source; no log scan, no opencode stats (7 s instead of 28 s)
 
